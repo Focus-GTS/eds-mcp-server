@@ -25,6 +25,11 @@
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18.0.0"
   }
