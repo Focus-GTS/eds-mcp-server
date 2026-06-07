@@ -47,4 +47,13 @@ if (!owner || !repo) {
 
 const server = createServer({ owner, repo, ref, apiKey, domainKey });
 const transport = new StdioServerTransport();
+
+async function shutdown() {
+  await server.close();
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
 await server.connect(transport);

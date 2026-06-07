@@ -1,0 +1,57 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.focusgts/eds-mcp-server",
+  "description": "20 tools for Adobe Edge Delivery Services: preview, publish, analytics, and content ops",
+  "repository": {
+    "url": "https://github.com/Focus-GTS/eds-mcp-server",
+    "source": "github"
+  },
+  "version": "0.2.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@focusgts/eds-mcp-server",
+      "version": "0.2.3",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "GitHub org/user that owns the EDS site repo",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false,
+          "name": "EDS_OWNER"
+        },
+        {
+          "description": "GitHub repository name for the EDS site",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false,
+          "name": "EDS_REPO"
+        },
+        {
+          "description": "Git branch (default: main)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "EDS_REF"
+        },
+        {
+          "description": "Admin API key for preview/publish/cache operations",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "EDS_API_KEY"
+        },
+        {
+          "description": "OpTel domain key for Core Web Vitals, 404s, and experiment queries",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "EDS_DOMAIN_KEY"
+        }
+      ]
+    }
+  ]
+}

@@ -1,9 +1,30 @@
 {
   "name": "@focusgts/eds-mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.3",
+  "mcpName": "io.github.focusgts/eds-mcp-server",
   "description": "MCP server for Adobe Edge Delivery Services — preview, publish, metrics, and content operations",
   "license": "Apache-2.0",
+  "author": "FocusGTS <dfox@focusgts.com> (https://focusgts.com)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Focus-GTS/eds-mcp-server"
+  },
+  "homepage": "https://github.com/Focus-GTS/eds-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/Focus-GTS/eds-mcp-server/issues"
+  },
+  "keywords": [
+    "mcp",
+    "adobe",
+    "edge-delivery-services",
+    "aem",
+    "helix",
+    "model-context-protocol",
+    "ai",
+    "content-management"
+  ],
   "type": "module",
+  "types": "dist/index.d.ts",
   "main": "dist/index.js",
   "bin": {
     "eds-mcp-server": "dist/index.js"

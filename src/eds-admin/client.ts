@@ -22,6 +22,8 @@ import type {
   EdsLogEntry,
   EdsApiKey,
   EdsClientOptions,
+  EdsBulkResult,
+  EdsRedirectEntry,
 } from './types.js';
 
 export class EdsClient {
@@ -47,9 +49,13 @@ export class EdsClient {
   // Helpers
   // -------------------------------------------------------------------------
 
-  /** Strip a leading slash so paths are always relative. */
+  /** Strip leading slashes and reject path traversal attempts. */
   private normalizePath(path: string): string {
-    return path.replace(/^\/+/, '');
+    const cleaned = path.replace(/^\/+/, '');
+    if (cleaned.split('/').some((seg) => seg === '..' || seg === '.')) {
+      throw new Error(`Invalid path: traversal segments are not allowed — ${path}`);
+    }
+    return cleaned;
   }
 
   /** Build the AEM Live content origin for this site. */
@@ -73,11 +79,16 @@ export class EdsClient {
    *
    * Throws a descriptive error when the response status is not ok.
    */
+  private static readonly REQUEST_TIMEOUT_MS = 30_000;
+
   private async request<T>(
     url: string,
     options?: RequestInit,
   ): Promise<T> {
-    const response = await fetch(url, options);
+    const response = await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(EdsClient.REQUEST_TIMEOUT_MS),
+    });
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
@@ -92,7 +103,7 @@ export class EdsClient {
       response.status === 204 ||
       response.headers.get('content-length') === '0'
     ) {
-      return {} as T;
+      return { status: response.status } as T;
     }
 
     if (contentType.includes('application/json')) {
@@ -433,5 +444,129 @@ export class EdsClient {
       return (result as { data: EdsApiKey[] }).data;
     }
     return [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Bulk Operations (Admin API)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Preview multiple pages in sequence.
+   *
+   * POST /preview/{owner}/{repo}/{ref}/{path} for each path.
+   */
+  async bulkPreview(paths: string[]): Promise<EdsBulkResult> {
+    const result: EdsBulkResult = { succeeded: [], failed: [] };
+
+    for (const path of paths) {
+      try {
+        await this.previewPage(path);
+        result.succeeded.push(path);
+      } catch (error) {
+        result.failed.push({
+          path,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Publish multiple pages in sequence.
+   *
+   * POST /live/{owner}/{repo}/{ref}/{path} for each path.
+   */
+  async bulkPublish(paths: string[]): Promise<EdsBulkResult> {
+    const result: EdsBulkResult = { succeeded: [], failed: [] };
+
+    for (const path of paths) {
+      try {
+        await this.publishPage(path);
+        result.succeeded.push(path);
+      } catch (error) {
+        result.failed.push({
+          path,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Preview a page and then immediately publish it.
+   */
+  async previewAndPublish(path: string): Promise<{ preview: EdsPreviewResponse; publish: EdsPublishResponse }> {
+    const preview = await this.previewPage(path);
+    const publish = await this.publishPage(path);
+    return { preview, publish };
+  }
+
+  // -------------------------------------------------------------------------
+  // Redirects (Content API)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fetch and parse the redirects spreadsheet.
+   *
+   * GET https://{ref}--{repo}--{owner}.aem.live/redirects.json
+   */
+  async getRedirects(): Promise<EdsRedirectEntry[]> {
+    const url = `${this.contentOrigin}/redirects.json`;
+
+    try {
+      const result = await this.request<{ data: Array<Record<string, string>> } | Array<Record<string, string>>>(
+        url,
+        { method: 'GET' },
+      );
+
+      const rows = Array.isArray(result)
+        ? result
+        : (result && typeof result === 'object' && 'data' in result)
+          ? (result as { data: Array<Record<string, string>> }).data
+          : [];
+
+      return rows.map((row) => ({
+        source: row.Source ?? row.source ?? '',
+        destination: row.Destination ?? row.destination ?? '',
+        type: parseInt(row.Type ?? row.type ?? '301', 10) || 301,
+      })).filter((r) => r.source && r.destination);
+    } catch {
+      return [];
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Search (Content API — client-side filtering)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Search pages in the query index by keyword.
+   *
+   * Fetches the full query index and filters client-side by title,
+   * description, or path.
+   */
+  async searchPages(
+    query: string,
+    limit: number = 20,
+  ): Promise<EdsQueryIndexResponse> {
+    const index = await this.listPages(10000, 0);
+    const q = query.toLowerCase();
+
+    const filtered = index.data.filter((entry) =>
+      entry.title?.toLowerCase().includes(q) ||
+      entry.description?.toLowerCase().includes(q) ||
+      entry.path?.toLowerCase().includes(q),
+    );
+
+    return {
+      total: filtered.length,
+      offset: 0,
+      limit,
+      data: filtered.slice(0, limit),
+    };
   }
 }

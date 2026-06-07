@@ -208,6 +208,30 @@ export interface EdsApiKey {
 }
 
 // ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+
+export interface EdsBulkResult {
+  /** Paths that were successfully processed */
+  succeeded: string[];
+  /** Paths that failed, with error messages */
+  failed: Array<{ path: string; error: string }>;
+}
+
+// ---------------------------------------------------------------------------
+// Redirects
+// ---------------------------------------------------------------------------
+
+export interface EdsRedirectEntry {
+  /** Source path (from) */
+  source: string;
+  /** Destination URL or path (to) */
+  destination: string;
+  /** HTTP status code — 301 (permanent) or 302 (temporary) */
+  type: number;
+}
+
+// ---------------------------------------------------------------------------
 // Client options — used when constructing the EDS admin client
 // ---------------------------------------------------------------------------
 

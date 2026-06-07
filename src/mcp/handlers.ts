@@ -358,3 +358,139 @@ export async function handleGetApiKeys(
     return errorResult(error);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+
+export async function handleBulkPreview(
+  client: EdsClient,
+  args: { paths: string[] },
+) {
+  try {
+    const result = await client.bulkPreview(args.paths);
+    const lines = [`Bulk preview: ${result.succeeded.length} succeeded, ${result.failed.length} failed`, ''];
+
+    if (result.succeeded.length > 0) {
+      lines.push('Succeeded:');
+      for (const path of result.succeeded) {
+        lines.push(`  ✓ ${path}`);
+      }
+    }
+
+    if (result.failed.length > 0) {
+      lines.push('', 'Failed:');
+      for (const f of result.failed) {
+        lines.push(`  ✗ ${f.path} — ${f.error}`);
+      }
+    }
+
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handleBulkPublish(
+  client: EdsClient,
+  args: { paths: string[] },
+) {
+  try {
+    const result = await client.bulkPublish(args.paths);
+    const lines = [`Bulk publish: ${result.succeeded.length} succeeded, ${result.failed.length} failed`, ''];
+
+    if (result.succeeded.length > 0) {
+      lines.push('Published:');
+      for (const path of result.succeeded) {
+        lines.push(`  ✓ ${path}`);
+      }
+    }
+
+    if (result.failed.length > 0) {
+      lines.push('', 'Failed:');
+      for (const f of result.failed) {
+        lines.push(`  ✗ ${f.path} — ${f.error}`);
+      }
+    }
+
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handlePreviewAndPublish(
+  client: EdsClient,
+  args: { path: string },
+) {
+  try {
+    const { preview, publish } = await client.previewAndPublish(args.path);
+    const lines = [
+      `Preview + Publish completed for ${args.path}`,
+      '',
+      `Preview: ${preview.status} — ${preview.resourcePath}`,
+      `Live:    ${publish.status} — ${publish.resourcePath}`,
+    ];
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Redirects
+// ---------------------------------------------------------------------------
+
+export async function handleGetRedirects(
+  client: EdsClient,
+  _args: Record<string, never>,
+) {
+  try {
+    const entries = await client.getRedirects();
+
+    if (entries.length === 0) {
+      return textResult('No redirects found (redirects.json may not exist or is empty).');
+    }
+
+    const lines = [`Redirects: ${entries.length} rules`, ''];
+    lines.push('Source                                    → Destination                              Type');
+    lines.push('-'.repeat(95));
+    for (const entry of entries) {
+      const src = entry.source.length > 40 ? `${entry.source.slice(0, 37)}...` : entry.source.padEnd(40);
+      const dst = entry.destination.length > 40 ? `${entry.destination.slice(0, 37)}...` : entry.destination.padEnd(40);
+      lines.push(`${src} → ${dst} ${entry.type}`);
+    }
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+export async function handleSearchPages(
+  client: EdsClient,
+  args: { query: string; limit?: number },
+) {
+  try {
+    const index = await client.searchPages(args.query, args.limit);
+
+    if (index.data.length === 0) {
+      return textResult(`No pages matching "${args.query}".`);
+    }
+
+    const lines = [`Search results for "${args.query}": ${index.total} matches (showing ${index.data.length})`, ''];
+    for (const entry of index.data) {
+      const modified = new Date(entry.lastModified * 1000).toISOString().slice(0, 10);
+      lines.push(`  ${entry.path}  —  ${entry.title}  (${modified})`);
+      if (entry.description) {
+        lines.push(`    ${entry.description.slice(0, 100)}${entry.description.length > 100 ? '...' : ''}`);
+      }
+    }
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
