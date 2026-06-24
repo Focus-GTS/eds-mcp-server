@@ -57,10 +57,38 @@ Add to `.vscode/mcp.json`:
 | `EDS_OWNER` | Yes | GitHub org/user that owns the EDS site repo |
 | `EDS_REPO` | Yes | GitHub repository name |
 | `EDS_REF` | No | Git branch (default: `main`) |
-| `EDS_API_KEY` | No | Admin API key for preview/publish/cache operations |
+| `EDS_API_KEY` | No | Admin API token override for preview/publish/cache operations (see Authentication; browser login is the alternative) |
 | `EDS_DOMAIN_KEY` | No | OpTel domain key for analytics queries |
 
-**Read-only tools** (content, sitemap, metadata, query index) work with no keys at all. **Write tools** (preview, publish, cache purge) need `EDS_API_KEY`. **Analytics tools** (CWV, 404s, experiments) need `EDS_DOMAIN_KEY`.
+**Read-only tools** (content, sitemap, metadata, query index) work with no keys at all. **Write tools** (preview, publish, cache purge) need an admin token (see Authentication). **Analytics tools** (CWV, 404s, experiments) need `EDS_DOMAIN_KEY`.
+
+## Authentication
+
+Admin operations (preview, publish, unpublish, status, cache purge, config, logs, API keys) require an EDS Admin token. There are two ways to provide one:
+
+### 1. Browser sign-in (recommended)
+
+Sign in once with your Adobe / GitHub account — no token copy-pasting:
+
+```bash
+EDS_OWNER=myorg EDS_REPO=mysite npx @focusgts/eds-mcp-server login
+# or with flags:
+npx @focusgts/eds-mcp-server login --owner myorg --repo mysite --ref main
+```
+
+This opens your system browser to Adobe's hlx admin login (`admin.hlx.page`, the same flow used by the AEM CLI). After you authenticate, the token is cached at `~/.aem/ims-token.json` (file mode `0600`) and reused automatically by the MCP server. The cached token is valid for roughly 24 hours; just run `login` again when it expires. The MCP server itself runs headless over stdio and will never pop a browser on its own — if a token is missing or expired, admin tools return a friendly *"Run `npx @focusgts/eds-mcp-server login` to sign in"* message.
+
+### 2. `EDS_API_KEY` (CI / automation override)
+
+Setting `EDS_API_KEY` continues to work exactly as before and takes precedence over any cached browser token. This is the recommended path for CI pipelines and non-interactive automation:
+
+```bash
+EDS_OWNER=myorg EDS_REPO=mysite EDS_API_KEY=hlx_... npx @focusgts/eds-mcp-server
+```
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EDS_API_KEY` | No | Admin API token. Overrides the cached browser-login token when set. |
 
 ## Tools
 

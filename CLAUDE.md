@@ -33,8 +33,32 @@ src/
 | `EDS_OWNER` | Yes | GitHub org/owner for the EDS site |
 | `EDS_REPO` | Yes | GitHub repo name |
 | `EDS_REF` | No | Git ref (default: `main`) |
-| `EDS_API_KEY` | No | Admin API key (required for preview/publish/cache operations) |
+| `EDS_API_KEY` | No | Admin API token override (see Authentication). Browser login is the alternative for interactive use. |
 | `EDS_DOMAIN_KEY` | No | OpTel domain key (required for CWV/404/experiment queries) |
+
+## Authentication
+
+Admin operations require an EDS Admin token, resolved at request time by `src/auth/getValidToken`:
+
+1. **`EDS_API_KEY` override** — if set, always used (bypasses cache). Keeps CI / automation working unchanged.
+2. **Cached browser-login token** — `~/.aem/ims-token.json`, used when valid (not within 60s of expiry) and owner/repo match.
+3. Otherwise a `NeedsLoginError` surfaces as a friendly MCP error: *"Run `npx @focusgts/eds-mcp-server login` to sign in."*
+
+Interactive sign-in (Adobe's hlx admin flow, same as the AEM CLI):
+
+```bash
+EDS_OWNER=myorg EDS_REPO=mysite npx @focusgts/eds-mcp-server login
+```
+
+This opens the system browser to `admin.hlx.page/login/{owner}/{repo}/{ref}?client_id=aem-cli&...`, runs a local loopback callback server on a random port, and caches the returned token (mode `0600`, ~24h TTL). The MCP server runs headless over stdio and never auto-opens a browser.
+
+Auth code lives in `src/auth/`:
+- `token-store.ts` — load/save/clear `~/.aem/ims-token.json` (0600)
+- `browser.ts` — cross-platform `openBrowser` (never throws; prints URL as fallback)
+- `admin-login.ts` — `login()` browser flow + 120s timeout + callback server
+- `index.ts` — `getValidToken()` resolution + `NeedsLoginError`
+
+Read-only content/analytics tools never require a token.
 
 ## Build & Run
 

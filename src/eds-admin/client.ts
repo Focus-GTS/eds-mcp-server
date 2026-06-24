@@ -25,6 +25,7 @@ import type {
   EdsBulkResult,
   EdsRedirectEntry,
 } from './types.js';
+import { getValidToken } from '../auth/index.js';
 
 export class EdsClient {
   private readonly owner: string;
@@ -63,15 +64,27 @@ export class EdsClient {
     return `https://${this.ref}--${this.repo}--${this.owner}.aem.live`;
   }
 
-  /** Return common headers for Admin API requests. */
-  private getAdminHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
+  /**
+   * Resolve headers for an authenticated Admin API request.
+   *
+   * The auth token is resolved at request time: an explicit `EDS_API_KEY`
+   * (`this.apiKey`) is used as an override for backward compatibility, and
+   * otherwise the cached browser-login token is used. Throws
+   * `NeedsLoginError` (surfaced to the caller as a friendly MCP error) when
+   * no usable credential exists.
+   */
+  private async resolveAdminHeaders(): Promise<Record<string, string>> {
+    const token = getValidToken({
+      owner: this.owner,
+      repo: this.repo,
+      ref: this.ref,
+      override: this.apiKey,
+    });
+
+    return {
       'Accept': 'application/json',
+      'x-auth-token': token,
     };
-    if (this.apiKey) {
-      headers['x-auth-token'] = this.apiKey;
-    }
-    return headers;
   }
 
   /**
@@ -125,7 +138,7 @@ export class EdsClient {
 
     return this.request<EdsPreviewResponse>(url, {
       method: 'POST',
-      headers: this.getAdminHeaders(),
+      headers: await this.resolveAdminHeaders(),
     });
   }
 
@@ -136,7 +149,7 @@ export class EdsClient {
 
     return this.request<EdsPublishResponse>(url, {
       method: 'POST',
-      headers: this.getAdminHeaders(),
+      headers: await this.resolveAdminHeaders(),
     });
   }
 
@@ -147,7 +160,7 @@ export class EdsClient {
 
     return this.request<EdsPublishResponse>(url, {
       method: 'DELETE',
-      headers: this.getAdminHeaders(),
+      headers: await this.resolveAdminHeaders(),
     });
   }
 
@@ -158,7 +171,7 @@ export class EdsClient {
 
     return this.request<EdsStatus>(url, {
       method: 'GET',
-      headers: this.getAdminHeaders(),
+      headers: await this.resolveAdminHeaders(),
     });
   }
 
@@ -169,7 +182,7 @@ export class EdsClient {
 
     return this.request<EdsCacheResponse>(url, {
       method: 'POST',
-      headers: this.getAdminHeaders(),
+      headers: await this.resolveAdminHeaders(),
     });
   }
 
@@ -387,7 +400,7 @@ export class EdsClient {
 
     return this.request<EdsConfigResponse>(url, {
       method: 'GET',
-      headers: this.getAdminHeaders(),
+      headers: await this.resolveAdminHeaders(),
     });
   }
 
@@ -407,7 +420,7 @@ export class EdsClient {
       url,
       {
         method: 'GET',
-        headers: this.getAdminHeaders(),
+        headers: await this.resolveAdminHeaders(),
       },
     );
 
@@ -433,7 +446,7 @@ export class EdsClient {
       url,
       {
         method: 'GET',
-        headers: this.getAdminHeaders(),
+        headers: await this.resolveAdminHeaders(),
       },
     );
 
