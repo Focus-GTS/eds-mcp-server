@@ -36,12 +36,32 @@ export interface LoginResult {
 
 const ADMIN_LOGIN_BASE = 'https://admin.hlx.page/login';
 const CLIENT_ID = 'aem-cli';
-const CALLBACK_PATH = '/callback';
+// Path used by Adobe's own AEM CLI (adobe/helix-cli) for the login callback.
+// admin.hlx.page POSTs the token cross-origin to this exact path.
+const CALLBACK_PATH = '/.aem/cli/login/ack';
 const LOGIN_TIMEOUT_MS = 120_000;
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-/** Field names we accept as carrying the access token. */
-const TOKEN_FIELDS = ['token', 'access_token', 'accessToken', 'id_token', 'idToken'];
+/**
+ * Origins admin.hlx.page uses to POST the token to our loopback callback.
+ * The browser sends a CORS preflight first, so the callback must echo these.
+ */
+const ALLOWED_ORIGINS = ['https://admin.hlx.page', 'https://admin-ci.hlx.page'];
+
+/**
+ * Field names we accept as carrying the access token. `siteToken` is what
+ * adobe/helix-cli reads; `authToken` is what Adobe's own auth skill uses — both
+ * are the same value. The remaining names are liberal fallbacks.
+ */
+const TOKEN_FIELDS = [
+  'siteToken',
+  'authToken',
+  'token',
+  'access_token',
+  'accessToken',
+  'id_token',
+  'idToken',
+];
 /** Field names we accept as carrying an explicit expiry. */
 const EXPIRY_FIELDS = ['expiresAt', 'expires_at', 'expiresIn', 'expires_in', 'exp'];
 
@@ -63,6 +83,9 @@ export function buildLoginUrl(params: {
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
     state,
+    // Mirror Adobe's AEM CLI: force the account chooser so the user can pick
+    // the right identity rather than being silently signed in.
+    selectAccount: 'true',
   });
   return `${ADMIN_LOGIN_BASE}/${owner}/${repo}/${ref}?${query.toString()}`;
 }
@@ -116,6 +139,16 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
         if (url.pathname !== CALLBACK_PATH) {
           res.statusCode = 404;
           res.end('Not found');
+          return;
+        }
+
+        // admin.hlx.page delivers the token via a cross-origin POST, so the
+        // browser sends a CORS preflight (OPTIONS) first. Without these headers
+        // the browser blocks the POST and the token never reaches us.
+        applyCors(req, res);
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
           return;
         }
 
@@ -262,6 +295,19 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', () => resolve(''));
   });
+}
+
+/**
+ * Apply the CORS headers admin.hlx.page's browser page needs to POST the token
+ * to our loopback server. Only echoes the allow-origin for trusted origins.
+ */
+function applyCors(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type');
 }
 
 /** Return the first non-empty value among the given candidate field names. */
