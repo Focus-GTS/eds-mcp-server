@@ -1,8 +1,8 @@
 /**
  * Persistent token store for the EDS Admin API.
  *
- * Caches the IMS access token obtained via the browser login flow at
- * `~/.aem/ims-token.json` so that users don't have to re-authenticate on
+ * Caches the admin site token obtained via the browser login flow at
+ * `~/.aem/auth-token.json` so that users don't have to re-authenticate on
  * every invocation. The file is written with mode 0600 (owner read/write
  * only) because it contains a bearer credential.
  *
@@ -22,9 +22,9 @@ import {
   existsSync,
 } from 'node:fs';
 
-/** Persisted token record written to `~/.aem/ims-token.json`. */
+/** Persisted token record written to `~/.aem/auth-token.json`. */
 export interface StoredToken {
-  /** The IMS / admin bearer token used as the `x-auth-token` header value. */
+  /** The admin site token used as the `x-auth-token` header value. */
   token: string;
   /** Epoch milliseconds after which the token must be considered expired. */
   expiresAt: number;
@@ -41,9 +41,9 @@ export function getTokenDir(): string {
   return join(homedir(), '.aem');
 }
 
-/** Absolute path to the cached token file (`~/.aem/ims-token.json`). */
+/** Absolute path to the cached token file (`~/.aem/auth-token.json`). */
 export function getTokenPath(): string {
-  return join(getTokenDir(), 'ims-token.json');
+  return join(getTokenDir(), 'auth-token.json');
 }
 
 /**
@@ -72,7 +72,7 @@ export function loadToken(): StoredToken | null {
 }
 
 /**
- * Persist a token to `~/.aem/ims-token.json` with mode 0600.
+ * Persist a token to `~/.aem/auth-token.json` with mode 0600.
  *
  * Ensures the parent directory exists. Throws only if the write itself
  * fails (e.g. disk full, read-only filesystem).

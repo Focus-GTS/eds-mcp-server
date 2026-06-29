@@ -102,7 +102,7 @@ export function generateNonce(): string {
  * 2. Open the browser to the hlx login endpoint.
  * 3. Wait (up to 120s) for the token to arrive at the callback.
  * 4. Verify the returned `state` matches our nonce.
- * 5. Cache the token at `~/.aem/ims-token.json` (mode 0600) and return it.
+ * 5. Cache the token at `~/.aem/auth-token.json` (mode 0600) and return it.
  */
 export async function login(options: LoginOptions): Promise<LoginResult> {
   const owner = options.owner;
@@ -182,7 +182,9 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
             reject(
               new Error(
                 'Login failed: callback did not include a token. ' +
-                  `Received fields: ${Object.keys(fields).join(', ') || '(none)'}`,
+                  `Received fields: ${Object.keys(fields).join(', ') || '(none)'}. ` +
+                  'Use Google Chrome or Firefox to sign in (Safari is not supported), ' +
+                  'or set EDS_API_KEY instead — see the README.',
               ),
             ),
           );
@@ -222,15 +224,18 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
       openBrowser(loginUrl);
 
       process.stderr.write(
-        `\nWaiting for sign-in to complete (timeout ${LOGIN_TIMEOUT_MS / 1000}s)...\n`,
+        `\nWaiting for sign-in to complete (timeout ${LOGIN_TIMEOUT_MS / 1000}s)...\n` +
+          'Use Google Chrome or Firefox to sign in (Safari blocks the local callback). ' +
+          "If it doesn't complete, set EDS_API_KEY instead — see the README.\n",
       );
 
       timeout = setTimeout(() => {
         settle(() =>
           reject(
             new Error(
-              `Login timed out after ${LOGIN_TIMEOUT_MS / 1000}s — no callback received. ` +
-                'Please try again.',
+              `Login timed out after ${LOGIN_TIMEOUT_MS / 1000}s — no callback was received. ` +
+                'Safari is not supported (it blocks the local callback) — use Google Chrome or Firefox. ' +
+                'Alternatively, set EDS_API_KEY instead of signing in — see the README.',
             ),
           ),
         );

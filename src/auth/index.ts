@@ -6,7 +6,7 @@
  *
  *   1. Explicit override (the legacy `EDS_API_KEY`) — always wins, bypasses
  *      the cache so CI / automation keeps working unchanged.
- *   2. A valid cached token from the browser login flow (`~/.aem/ims-token.json`),
+ *   2. A valid cached token from the browser login flow (`~/.aem/auth-token.json`),
  *      provided it isn't within 60s of expiry and matches owner/repo.
  *   3. Otherwise throw {@link NeedsLoginError} with a friendly "run login"
  *      message. We never auto-open a browser here because the MCP server runs
