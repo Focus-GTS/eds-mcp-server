@@ -1,20 +1,129 @@
-# EDS MCP Server
+<div align="center">
 
-MCP server for Adobe Edge Delivery Services. Gives AI agents (Claude Code, Cursor, GitHub Copilot) programmatic access to EDS operations — preview, publish, read content, query performance metrics, and manage site configuration.
+![EDS MCP Server](hero.svg)
 
-**20 tools. Zero dependencies beyond the MCP SDK. Works with any EDS site.**
+[![npm](https://img.shields.io/npm/v/%40focusgts%2Feds-mcp-server?color=CB3837&label=npm&logo=npm)](https://www.npmjs.com/package/@focusgts/eds-mcp-server)
+[![installs](https://img.shields.io/npm/dm/%40focusgts%2Feds-mcp-server?color=CB3837&label=installs%2Fmo)](https://www.npmjs.com/package/@focusgts/eds-mcp-server)
+[![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-6E56CF)](https://registry.modelcontextprotocol.io)
+[![awesome-mcp-servers](https://img.shields.io/badge/awesome--mcp--servers-listed-FFD700)](https://github.com/punkpeye/awesome-mcp-servers)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-## Quick Start
+### Let an AI agent run your Adobe Edge Delivery site.
 
-### Claude Code
+**20 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+The first MCP server purpose-built for Edge Delivery Services.
+
+![Ask your agent](https://readme-typing-svg.demolab.com/?font=JetBrains+Mono&size=20&duration=2600&pause=800&color=6E56CF&center=true&vCenter=true&width=640&height=42&lines=%22Preview+and+publish+the+homepage%22;%22What+are+the+Core+Web+Vitals%3F%22;%22Find+pages+missing+a+description%22;%22Publish+all+the+blog+posts%22)
+
+</div>
+
+---
+
+## ⚡ Do it in three lines
 
 ```bash
 claude mcp add eds -e EDS_OWNER=your-org -e EDS_REPO=your-site -- npx @focusgts/eds-mcp-server
 ```
 
-### Cursor
+Then just ask your agent:
 
-Add to `.cursor/mcp.json`:
+> *"Preview and publish the homepage."*
+> *"What are the Core Web Vitals across the site?"*
+> *"Find every page about pricing and list the ones missing a description."*
+
+That's it — no local AEM, no scripts, no glue code.
+
+---
+
+## 🧠 How it works
+
+```mermaid
+flowchart LR
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>20 tools"]
+  B --> C["Admin API<br/>admin.hlx.page"]
+  B --> D["Content API<br/>*.aem.live"]
+  B --> E["RUM / OpTel<br/>Core Web Vitals"]
+  C --> F["Your EDS site"]
+  D --> F
+  E --> F
+```
+
+The agent calls tools; the server talks to the live EDS infrastructure. Read-only tools (content, sitemap, metadata) need no credentials at all.
+
+---
+
+## 🔑 One-click sign-in
+
+No more pasting a fresh admin token every day:
+
+```mermaid
+sequenceDiagram
+  participant You
+  participant CLI as eds-mcp-server login
+  participant Adobe as admin.hlx.page
+  You->>CLI: npx @focusgts/eds-mcp-server login
+  CLI->>Adobe: open browser (client_id=aem-cli)
+  You->>Adobe: sign in & approve
+  Adobe-->>CLI: siteToken → localhost callback
+  CLI-->>You: cached ~/.aem/auth-token.json (reused automatically)
+```
+
+> Use Chrome or Firefox — Safari blocks the local callback (same as Adobe's AEM CLI). `EDS_API_KEY` works as the CI / fallback path.
+
+---
+
+## 🛠️ The 20 tools
+
+<table>
+<tr><td valign="top" width="33%">
+
+**Publishing**
+- `eds_preview_page`
+- `eds_publish_page`
+- `eds_unpublish_page`
+- `eds_preview_and_publish`
+- `eds_get_status`
+- `eds_purge_cache`
+- `eds_bulk_preview`
+- `eds_bulk_publish`
+
+</td><td valign="top" width="33%">
+
+**Content**
+- `eds_get_page`
+- `eds_list_pages`
+- `eds_search_pages`
+- `eds_get_metadata`
+- `eds_get_sitemap`
+- `eds_get_redirects`
+
+</td><td valign="top" width="33%">
+
+**Analytics & config**
+- `eds_get_cwv`
+- `eds_get_404s`
+- `eds_get_experiments`
+- `eds_get_config`
+- `eds_get_logs`
+- `eds_get_api_keys`
+
+</td></tr>
+</table>
+
+---
+
+## 🔌 Add it to your tool
+
+<details open>
+<summary><b>Claude Code</b> — one command</summary>
+
+```bash
+claude mcp add eds -e EDS_OWNER=your-org -e EDS_REPO=your-site -- npx @focusgts/eds-mcp-server
+```
+</details>
+
+<details>
+<summary><b>Cursor</b> — <code>.cursor/mcp.json</code></summary>
 
 ```json
 {
@@ -22,18 +131,15 @@ Add to `.cursor/mcp.json`:
     "eds": {
       "command": "npx",
       "args": ["@focusgts/eds-mcp-server"],
-      "env": {
-        "EDS_OWNER": "your-org",
-        "EDS_REPO": "your-site"
-      }
+      "env": { "EDS_OWNER": "your-org", "EDS_REPO": "your-site" }
     }
   }
 }
 ```
+</details>
 
-### VS Code (GitHub Copilot)
-
-Add to `.vscode/mcp.json`:
+<details>
+<summary><b>VS Code (GitHub Copilot)</b> — <code>.vscode/mcp.json</code></summary>
 
 ```json
 {
@@ -41,168 +147,79 @@ Add to `.vscode/mcp.json`:
     "eds": {
       "command": "npx",
       "args": ["@focusgts/eds-mcp-server"],
-      "env": {
-        "EDS_OWNER": "your-org",
-        "EDS_REPO": "your-site"
-      }
+      "env": { "EDS_OWNER": "your-org", "EDS_REPO": "your-site" }
     }
   }
 }
 ```
+</details>
 
-## Configuration
+---
+
+## ⚙️ Configuration
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `EDS_OWNER` | Yes | GitHub org/user that owns the EDS site repo |
 | `EDS_REPO` | Yes | GitHub repository name |
 | `EDS_REF` | No | Git branch (default: `main`) |
-| `EDS_API_KEY` | No | Admin API token override for preview/publish/cache operations (see Authentication; browser login is the alternative) |
-| `EDS_DOMAIN_KEY` | No | OpTel domain key for analytics queries |
+| `EDS_API_KEY` | No | Admin token (see Authentication). Browser login is the alternative. |
+| `EDS_DOMAIN_KEY` | No | OpTel domain key for analytics queries (CWV, 404s, experiments) |
 
-**Read-only tools** (content, sitemap, metadata, query index) work with no keys at all. **Write tools** (preview, publish, cache purge) need an admin token (see Authentication). **Analytics tools** (CWV, 404s, experiments) need `EDS_DOMAIN_KEY`.
+**Read-only tools** (content, sitemap, metadata) need no keys. **Write tools** (preview, publish, cache) need an admin token. **Analytics tools** need `EDS_DOMAIN_KEY`.
 
-## Authentication
+---
 
-Admin operations (preview, publish, unpublish, status, cache purge, config, logs, API keys) require an EDS Admin token. There are two ways to provide one.
+## 🔐 Authentication
 
-### 1. Browser sign-in (recommended for interactive use)
+Admin operations require an EDS Admin token. Two ways to provide one.
 
-Sign in once with your Adobe / GitHub account — no token copy-pasting:
-
-```bash
-EDS_OWNER=myorg EDS_REPO=mysite npx @focusgts/eds-mcp-server login
-# or with flags:
-npx @focusgts/eds-mcp-server login --owner myorg --repo mysite --ref main
-```
-
-This opens your system browser to Adobe's hlx admin login (`admin.hlx.page`, the same flow used by the AEM CLI). After you authenticate, the admin site token is cached at `~/.aem/auth-token.json` (file mode `0600`, ~24h TTL) and reused automatically by the MCP server. Just run `login` again when it expires. The MCP server itself runs headless over stdio and will never pop a browser on its own — if a token is missing or expired, admin tools return a friendly *"Run `npx @focusgts/eds-mcp-server login` to sign in"* message.
-
-> **Use Chrome or Firefox — Safari is not supported.** Safari blocks the HTTP-localhost callback the login flow relies on, so sign-in never completes there. This is the same limitation as Adobe's own AEM CLI (`helix-cli`). If you only have Safari, use `EDS_API_KEY` instead.
-
-### 2. `EDS_API_KEY` (CI / automation, and the fallback)
-
-Setting `EDS_API_KEY` always takes precedence over any cached browser token. It's the right path for CI pipelines and non-interactive automation, and the fallback when browser sign-in isn't available:
+**Browser sign-in (recommended for interactive use)**
 
 ```bash
-EDS_OWNER=myorg EDS_REPO=mysite EDS_API_KEY=<your-admin-token> npx @focusgts/eds-mcp-server
+EDS_OWNER=your-org EDS_REPO=your-site npx @focusgts/eds-mcp-server login
 ```
 
-**How to get a token** (verified against [Adobe's API key docs](https://www.aem.live/docs/admin-apikeys)):
+Opens your browser to Adobe's `admin.hlx.page` login (the same flow as the AEM CLI). The admin site token caches at `~/.aem/auth-token.json` (mode `0600`, ~24h) and is reused automatically. **Use Chrome or Firefox — Safari blocks the local callback.**
 
-- Sign in at `https://admin.hlx.page/login`, then copy the `auth_token` cookie value from your browser's DevTools (Application → Cookies).
-- Or copy the `x-auth-token` request header from an authenticated AEM Sidekick request (DevTools → Network).
-- For a durable credential that doesn't expire with your session, configure a **site API key** as described in the [Adobe admin API keys documentation](https://www.aem.live/docs/admin-apikeys).
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `EDS_API_KEY` | No | Admin site token. Overrides the cached browser-login token when set. |
-
-## Tools
-
-### Publishing Operations
-
-| Tool | Description |
-|------|-------------|
-| `eds_preview_page` | Trigger preview for a page so content source changes appear on `*.aem.page` |
-| `eds_publish_page` | Publish a page from preview to the live production domain (`*.aem.live`) |
-| `eds_unpublish_page` | Remove a page from the live site |
-| `eds_preview_and_publish` | Preview and publish a page in a single atomic operation |
-| `eds_get_status` | Get preview, live, and code-bus status for a resource |
-| `eds_purge_cache` | Purge CDN cache for a page path |
-
-### Bulk Operations
-
-| Tool | Description |
-|------|-------------|
-| `eds_bulk_preview` | Preview multiple pages in one call (up to 100 paths) |
-| `eds_bulk_publish` | Publish multiple pages in one call (up to 100 paths) |
-
-### Content Reading
-
-| Tool | Description |
-|------|-------------|
-| `eds_get_page` | Fetch rendered page content via `.plain.html` |
-| `eds_list_pages` | Query the site's page index with pagination |
-| `eds_search_pages` | Search pages by keyword across titles, descriptions, and paths |
-| `eds_get_metadata` | Fetch the site metadata sheet |
-| `eds_get_sitemap` | Fetch and parse `sitemap.xml` |
-| `eds_get_redirects` | Fetch and parse the redirects spreadsheet |
-
-### Analytics (OpTel)
-
-| Tool | Description |
-|------|-------------|
-| `eds_get_cwv` | Core Web Vitals (LCP, CLS, INP, TTFB) by page |
-| `eds_get_404s` | 404 error report with hit counts and referrers |
-| `eds_get_experiments` | A/B experiment results with conversion rates |
-
-### Configuration
-
-| Tool | Description |
-|------|-------------|
-| `eds_get_config` | Read site configuration |
-| `eds_get_logs` | Project activity log (preview, publish, config actions) |
-| `eds_get_api_keys` | List API keys configured for the site |
-
-## Examples
-
-Once connected, ask your AI agent:
-
-```
-"What pages are on this EDS site?"           -> eds_list_pages
-"Find all pages about pricing"               -> eds_search_pages
-"Show me the content of the about page"      -> eds_get_page
-"What are the Core Web Vitals for this site?" -> eds_get_cwv
-"Preview and publish the homepage"           -> eds_preview_and_publish
-"Publish all blog posts"                     -> eds_bulk_publish
-"Are there any 404 errors on the site?"      -> eds_get_404s
-"Show me the redirect rules"                 -> eds_get_redirects
-"Show me the site configuration"             -> eds_get_config
-```
-
-## How It Works
-
-This is a local MCP server that runs on your machine via stdio. When you connect it to Claude Code, Cursor, or another MCP-compatible AI tool, the agent can call these tools to interact with your EDS site's real APIs:
-
-- **Admin API** (`admin.hlx.page`) for preview, publish, cache, config, and logs
-- **Content API** (`*.aem.live`) for page content, query index, metadata, and sitemap
-- **OpTel API** (`rum.hlx.page`) for Core Web Vitals, 404 tracking, and experiment data
-
-No sandbox or local AEM instance needed. The server talks directly to the live EDS infrastructure.
-
-## Architecture
-
-Built following Adobe's MCP server conventions (derived from `adobe-rnd/da-mcp`):
-
-- TypeScript + `@modelcontextprotocol/sdk` + `zod`
-- Stateless per-request
-- Tool naming: `eds_{verb}_{noun}`
-- Stdio transport for local use
-- Native `fetch()` (Node 18+, zero HTTP dependencies)
-
-## Development
+**`EDS_API_KEY` (CI / automation, and the fallback)** — always takes precedence when set.
 
 ```bash
-git clone https://github.com/focusgts/eds-mcp-server.git
-cd eds-mcp-server
-npm install
-npm run build
-npm test
+EDS_OWNER=your-org EDS_REPO=your-site EDS_API_KEY=<your-admin-token> npx @focusgts/eds-mcp-server
 ```
 
-## Related Tools
+To get a token (per [Adobe's API key docs](https://www.aem.live/docs/admin-apikeys)): sign in at `https://admin.hlx.page/login`, then copy the `auth_token` cookie value from DevTools — or copy the `x-auth-token` header from an authenticated AEM Sidekick request. For a durable credential, configure a site API key.
 
-| Tool | What it does |
-|------|-------------|
-| [eds-content-ops-skills](https://github.com/focusgts/eds-content-ops-skills) | 43 AI skills for EDS content ops — auditing, SEO, accessibility, blocks, migration, and more. Pair with this MCP server for automated workflows. |
-| [@focusgts/eds-ops](https://www.npmjs.com/package/@focusgts/eds-ops) | CLI health scanner and GitHub Action for automated site grading and PR gating. |
-| [EDS Score](https://www.focusgts.com/eds-score/) | Free browser-based site health analyzer for EDS sites. |
+---
 
-## About
+## 🏗️ Architecture
 
-Built by [FocusGTS](https://focusgts.com) — Adobe Silver Solution Partner specializing in Edge Delivery Services.
+Built following Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 
-## License
+- TypeScript + `@modelcontextprotocol/sdk` + `zod`, stateless per request
+- Tool naming: `eds_{verb}_{noun}` · stdio transport
+- Native `fetch()` (Node 18+) — no HTTP dependencies
 
-Apache-2.0
+```bash
+git clone https://github.com/Focus-GTS/eds-mcp-server.git
+cd eds-mcp-server && npm install && npm run build && npm test
+```
+
+---
+
+## 🧩 Part of the FocusGTS EDS suite
+
+| | |
+|---|---|
+| [eds-content-ops-skills](https://github.com/Focus-GTS/eds-content-ops-skills) | AI skills for EDS content ops — first third-party contributor merged into [Adobe's official skills repo](https://github.com/adobe/skills) |
+| [eds-ops](https://github.com/Focus-GTS/eds-ops) | CLI + GitHub Action for automated site grading and PR gating |
+| [EDS Score](https://www.focusgts.com/eds-score/) | Free browser-based site health analyzer |
+
+---
+
+<div align="center">
+
+Built by **[FocusGTS](https://focusgts.com)** — Adobe Silver Solution Partner · Apache-2.0
+<br/>Not affiliated with or endorsed by Adobe Inc.
+
+</div>
