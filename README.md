@@ -57,10 +57,46 @@ Add to `.vscode/mcp.json`:
 | `EDS_OWNER` | Yes | GitHub org/user that owns the EDS site repo |
 | `EDS_REPO` | Yes | GitHub repository name |
 | `EDS_REF` | No | Git branch (default: `main`) |
-| `EDS_API_KEY` | No | Admin API key for preview/publish/cache operations |
+| `EDS_API_KEY` | No | Admin API token override for preview/publish/cache operations (see Authentication; browser login is the alternative) |
 | `EDS_DOMAIN_KEY` | No | OpTel domain key for analytics queries |
 
-**Read-only tools** (content, sitemap, metadata, query index) work with no keys at all. **Write tools** (preview, publish, cache purge) need `EDS_API_KEY`. **Analytics tools** (CWV, 404s, experiments) need `EDS_DOMAIN_KEY`.
+**Read-only tools** (content, sitemap, metadata, query index) work with no keys at all. **Write tools** (preview, publish, cache purge) need an admin token (see Authentication). **Analytics tools** (CWV, 404s, experiments) need `EDS_DOMAIN_KEY`.
+
+## Authentication
+
+Admin operations (preview, publish, unpublish, status, cache purge, config, logs, API keys) require an EDS Admin token. There are two ways to provide one.
+
+### 1. Browser sign-in (recommended for interactive use)
+
+Sign in once with your Adobe / GitHub account — no token copy-pasting:
+
+```bash
+EDS_OWNER=myorg EDS_REPO=mysite npx @focusgts/eds-mcp-server login
+# or with flags:
+npx @focusgts/eds-mcp-server login --owner myorg --repo mysite --ref main
+```
+
+This opens your system browser to Adobe's hlx admin login (`admin.hlx.page`, the same flow used by the AEM CLI). After you authenticate, the admin site token is cached at `~/.aem/auth-token.json` (file mode `0600`, ~24h TTL) and reused automatically by the MCP server. Just run `login` again when it expires. The MCP server itself runs headless over stdio and will never pop a browser on its own — if a token is missing or expired, admin tools return a friendly *"Run `npx @focusgts/eds-mcp-server login` to sign in"* message.
+
+> **Use Chrome or Firefox — Safari is not supported.** Safari blocks the HTTP-localhost callback the login flow relies on, so sign-in never completes there. This is the same limitation as Adobe's own AEM CLI (`helix-cli`). If you only have Safari, use `EDS_API_KEY` instead.
+
+### 2. `EDS_API_KEY` (CI / automation, and the fallback)
+
+Setting `EDS_API_KEY` always takes precedence over any cached browser token. It's the right path for CI pipelines and non-interactive automation, and the fallback when browser sign-in isn't available:
+
+```bash
+EDS_OWNER=myorg EDS_REPO=mysite EDS_API_KEY=<your-admin-token> npx @focusgts/eds-mcp-server
+```
+
+**How to get a token** (verified against [Adobe's API key docs](https://www.aem.live/docs/admin-apikeys)):
+
+- Sign in at `https://admin.hlx.page/login`, then copy the `auth_token` cookie value from your browser's DevTools (Application → Cookies).
+- Or copy the `x-auth-token` request header from an authenticated AEM Sidekick request (DevTools → Network).
+- For a durable credential that doesn't expire with your session, configure a **site API key** as described in the [Adobe admin API keys documentation](https://www.aem.live/docs/admin-apikeys).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EDS_API_KEY` | No | Admin site token. Overrides the cached browser-login token when set. |
 
 ## Tools
 

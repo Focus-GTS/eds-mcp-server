@@ -19,6 +19,67 @@
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createServer } from './mcp/server.js';
+import { login } from './auth/index.js';
+
+/** Parse `--flag value` and `--flag=value` style CLI arguments. */
+function parseFlag(argv: string[], name: string): string | undefined {
+  const prefix = `--${name}`;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === prefix) {
+      return argv[i + 1];
+    }
+    if (arg.startsWith(`${prefix}=`)) {
+      return arg.slice(prefix.length + 1);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * `login` subcommand — run the browser sign-in flow and exit.
+ *
+ * Reads owner/repo/ref from EDS_OWNER/EDS_REPO/EDS_REF or
+ * `--owner`/`--repo`/`--ref` flags. Never starts the MCP server.
+ */
+async function runLogin(argv: string[]): Promise<never> {
+  const owner = parseFlag(argv, 'owner') ?? process.env.EDS_OWNER;
+  const repo = parseFlag(argv, 'repo') ?? process.env.EDS_REPO;
+  const ref = parseFlag(argv, 'ref') ?? process.env.EDS_REF ?? 'main';
+
+  if (!owner || !repo) {
+    process.stderr.write(
+      [
+        'EDS MCP Server — login requires the site owner and repo.',
+        '',
+        'Provide them via environment variables:',
+        '  EDS_OWNER=<org> EDS_REPO=<repo> npx @focusgts/eds-mcp-server login',
+        '',
+        'Or via flags:',
+        '  npx @focusgts/eds-mcp-server login --owner <org> --repo <repo> [--ref main]',
+        '',
+      ].join('\n'),
+    );
+    process.exit(1);
+  }
+
+  try {
+    const result = await login({ owner, repo, ref });
+    const expiry = new Date(result.expiresAt).toISOString();
+    process.stderr.write(
+      `\nSigned in to ${owner}/${repo} (ref: ${ref}). Token cached until ${expiry}.\n`,
+    );
+    process.exit(0);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`\nLogin failed: ${message}\n`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[2] === 'login') {
+  await runLogin(process.argv.slice(3));
+}
 
 const owner = process.env.EDS_OWNER;
 const repo = process.env.EDS_REPO;

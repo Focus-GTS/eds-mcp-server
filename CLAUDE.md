@@ -33,8 +33,34 @@ src/
 | `EDS_OWNER` | Yes | GitHub org/owner for the EDS site |
 | `EDS_REPO` | Yes | GitHub repo name |
 | `EDS_REF` | No | Git ref (default: `main`) |
-| `EDS_API_KEY` | No | Admin API key (required for preview/publish/cache operations) |
+| `EDS_API_KEY` | No | Admin API token override (see Authentication). Browser login is the alternative for interactive use. |
 | `EDS_DOMAIN_KEY` | No | OpTel domain key (required for CWV/404/experiment queries) |
+
+## Authentication
+
+Admin operations require an EDS Admin token, resolved at request time by `src/auth/getValidToken`:
+
+1. **`EDS_API_KEY` override** — if set, always used (bypasses cache). Keeps CI / automation working unchanged.
+2. **Cached browser-login token** — `~/.aem/auth-token.json`, used when valid (not within 60s of expiry) and owner/repo match.
+3. Otherwise a `NeedsLoginError` surfaces as a friendly MCP error: *"Run `npx @focusgts/eds-mcp-server login` to sign in."*
+
+Interactive sign-in (Adobe's hlx admin flow, same as the AEM CLI) — recommended for interactive use:
+
+```bash
+EDS_OWNER=myorg EDS_REPO=mysite npx @focusgts/eds-mcp-server login
+```
+
+This opens the system browser to `admin.hlx.page/login/{owner}/{repo}/{ref}?client_id=aem-cli&...`, runs a local loopback callback server on a random port, and caches the returned admin site token (mode `0600`, ~24h TTL). The token is a Google-brokered admin site token delivered to the localhost callback — not an Adobe IMS token. The MCP server runs headless over stdio and never auto-opens a browser.
+
+**Use Chrome or Firefox — Safari is not supported** (Safari blocks the HTTP-localhost callback, the same limitation as Adobe's own AEM CLI). When browser sign-in isn't available, set `EDS_API_KEY` instead (see the README for how to obtain a token).
+
+Auth code lives in `src/auth/`:
+- `token-store.ts` — load/save/clear `~/.aem/auth-token.json` (0600)
+- `browser.ts` — cross-platform `openBrowser` (never throws; prints URL as fallback)
+- `admin-login.ts` — `login()` browser flow + 120s timeout + callback server
+- `index.ts` — `getValidToken()` resolution + `NeedsLoginError`
+
+Read-only content/analytics tools never require a token.
 
 ## Build & Run
 
