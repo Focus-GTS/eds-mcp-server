@@ -123,9 +123,17 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
-      server.close(() => action());
+      // Run the resolve/reject exactly once, whether it fires from the close
+      // callback or the failsafe timer below.
+      let ran = false;
+      const runOnce = (): void => {
+        if (ran) return;
+        ran = true;
+        action();
+      };
+      server.close(() => runOnce());
       // Failsafe in case close() hangs on a lingering keep-alive socket.
-      const failsafe = setTimeout(() => action(), 250);
+      const failsafe = setTimeout(() => runOnce(), 250);
       failsafe.unref();
     }
 
