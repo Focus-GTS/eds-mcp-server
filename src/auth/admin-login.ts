@@ -210,8 +210,14 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
       settle(() => reject(asError(err)));
     });
 
-    // Bind to a random free port on loopback only.
-    server.listen(0, '127.0.0.1', () => {
+    // Bind to a random free port on ALL interfaces (dual-stack) rather than
+    // 127.0.0.1 only. The redirect_uri uses the `localhost` hostname, which the
+    // OS may resolve to IPv6 (::1) — notably on macOS. Binding to 127.0.0.1
+    // alone leaves nothing listening on ::1, so the post-login callback gets
+    // "connection refused". Omitting the host binds the unspecified address
+    // (dual-stack), so `localhost` reaches us whether it resolves to ::1 or
+    // 127.0.0.1. The transient server is protected by the `state` nonce.
+    server.listen(0, () => {
       const address = server.address() as AddressInfo | null;
       if (!address || typeof address.port !== 'number') {
         settle(() =>
