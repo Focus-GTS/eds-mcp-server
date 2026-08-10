@@ -22,9 +22,22 @@ const { version } = require('../../package.json') as { version: string };
 const edsPath = z
   .string()
   .min(1, 'Path must not be empty')
-  .refine((v) => !v.split('/').some((s) => s === '..' || s === '.'), {
-    message: 'Path must not contain traversal segments (.. or .)',
-  });
+  .refine(
+    (v) =>
+      !v.split('/').some((s) => {
+        // Decode first so percent-encoded traversal (`%2e%2e`) is caught too.
+        let decoded: string;
+        try {
+          decoded = decodeURIComponent(s);
+        } catch {
+          decoded = s;
+        }
+        return decoded === '..' || decoded === '.';
+      }),
+    {
+      message: 'Path must not contain traversal segments (.. or .)',
+    },
+  );
 
 const edsDomain = z
   .string()

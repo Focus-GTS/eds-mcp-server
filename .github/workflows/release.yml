@@ -1,0 +1,191 @@
+name: Release
+
+# Publishing is triggered by pushing a version tag:
+#
+#   npm version patch          # bumps package.json, runs sync-version, commits, tags
+#   git push --follow-tags
+#
+# Everything after that is automated: gates, npm publish with provenance, and a
+# GitHub Release whose notes come from CHANGELOG.md. Nothing here can publish
+# from a branch push or a manual edit — only a `v*` tag reaches this workflow.
+#
+# ⚠️ DO NOT RENAME THIS FILE. npm Trusted Publishing binds to the workflow
+# filename (`release.yml`). Renaming it silently breaks publishing — npm will
+# reject the OIDC token because it no longer matches the registered publisher.
+on:
+  push:
+    tags:
+      - "v*"
+
+# Least privilege. `contents: write` creates the GitHub Release; `id-token:
+# write` lets npm mint a provenance attestation proving the package was built
+# by this workflow from this repo — which is what removes the need for a stored
+# npm token entirely.
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Verify, publish, release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted Publishing needs npm >= 11.5.1. Node 22 bundles npm 10.x, which
+      # silently falls back to token auth and fails with a confusing 404.
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@latest
+          echo "npm $(npm --version)  (OIDC requires >= 11.5.1)"
+
+      - name: Install
+        run: npm ci
+
+      # ---------------------------------------------------------------- gates
+      # Everything below must pass before anything is published. npm versions
+      # are immutable — a bad publish cannot be taken back, only superseded.
+
+      - name: Tag must match package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG  package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG."
+            echo "::error::Bump the version and re-tag. Publishing the wrong version is not reversible."
+            exit 1
+          fi
+
+      - name: Version must not already exist on npm
+        run: |
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VER="$(node -p "require('./package.json').version")"
+          if npm view "$PKG_NAME@$PKG_VER" version >/dev/null 2>&1; then
+            echo "::error::$PKG_NAME@$PKG_VER is already published. npm versions are immutable."
+            echo "::error::Bump to a new version rather than re-running this release."
+            exit 1
+          fi
+          echo "$PKG_NAME@$PKG_VER is unpublished — safe to proceed."
+
+      - name: server.json version must match too
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          SJ="$(node -p "require('./server.json').version")"
+          SJP="$(node -p "require('./server.json').packages[0].version")"
+          if [ "$TAG" != "$SJ" ] || [ "$TAG" != "$SJP" ]; then
+            echo "::error::server.json is at $SJ (package $SJP) but the tag is $TAG."
+            echo "::error::Run: npm run sync-version   then commit and re-tag."
+            exit 1
+          fi
+
+      - name: server.json mcpName must match package.json
+        run: |
+          A="$(node -p "require('./server.json').name")"
+          B="$(node -p "require('./package.json').mcpName")"
+          if [ "$A" != "$B" ]; then
+            echo "::error::server.json name ($A) != package.json mcpName ($B)."
+            echo "::error::The MCP Registry verifies ownership by matching these; publishing will be rejected."
+            exit 1
+          fi
+
+      - name: CHANGELOG must have an entry for this version
+        run: node scripts/extract-changelog.mjs "${GITHUB_REF_NAME}" > /dev/null
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Catches a build that emits files but cannot actually load, or a bin
+      # target that is missing — a package that installs but cannot start.
+      - name: Smoke-check the built entrypoint
+        run: |
+          BIN="$(node -p "require('./package.json').bin['eds-mcp-server']")"
+          test -f "$BIN" || { echo "::error::bin target $BIN missing from build"; exit 1; }
+          head -1 "$BIN" | grep -q '^#!/usr/bin/env node' || { echo "::error::bin target missing shebang"; exit 1; }
+          # Import the server factory (NOT the entrypoint, which auto-starts) and
+          # assert it constructs. Catches a build that emits files but cannot load.
+          node --input-type=module -e "
+            const { createServer } = await import('./dist/mcp/server.js');
+            const server = createServer({ owner: 'x', repo: 'y', ref: 'main' });
+            if (!server) { console.error('::error::createServer returned nothing'); process.exit(1); }
+            console.log('built entrypoint resolves — server factory constructs');
+          "
+
+      # -------------------------------------------------------------- publish
+
+      - name: Publish to npm (Trusted Publishing / OIDC)
+        # No token. GitHub mints a short-lived OIDC token that npm verifies
+        # against the trusted publisher registered on the package, so there is
+        # no long-lived credential to leak or rotate.
+        #
+        # `--provenance` is deliberately absent: under trusted publishing npm
+        # generates and publishes the attestation itself.
+        #
+        # setup-node's `registry-url` writes an .npmrc with an auth-token
+        # placeholder. npm would prefer it over OIDC and fail with a 404 that
+        # looks like a missing package. Remove it so npm falls through to OIDC.
+        run: |
+          rm -f "$NPM_CONFIG_USERCONFIG"
+          unset NODE_AUTH_TOKEN
+          npm publish --access public
+
+      # -------------------------------------------------------- github release
+
+      # Write the notes to a FILE and pass --notes-file. Do NOT interpolate the
+      # changelog into a shell command — release notes contain backticks
+      # (`eds_publish_page`, `EDS_API_KEY`), which bash would execute as command
+      # substitution. That breaks the release and lets a CHANGELOG entry run
+      # arbitrary code in CI.
+      - name: Extract release notes from CHANGELOG
+        run: node scripts/extract-changelog.mjs "${GITHUB_REF_NAME}" > /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file /tmp/release-notes.md \
+            --verify-tag
+
+      # ------------------------------------------------------------ registries
+      # The Official MCP Registry step is intentionally decoupled: the server's
+      # current registry name (io.github.focusgts/*) belongs to the personal
+      # `focusgts` account, which a workflow in the Focus-GTS org cannot prove
+      # ownership of via OIDC. Until that namespace decision is made, this step
+      # is a documented no-op and never fails the release — npm is already live.
+      - name: Publish to the Official MCP Registry
+        continue-on-error: true
+        env:
+          MCP_REGISTRY_DNS_KEY: ${{ secrets.MCP_REGISTRY_DNS_KEY }}
+        run: |
+          if [ -z "$MCP_REGISTRY_DNS_KEY" ]; then
+            echo "MCP_REGISTRY_DNS_KEY not set — skipping registry publish."
+            echo "The registry listing is refreshed manually until the namespace"
+            echo "decision (io.github.focusgts vs com.focusgts) is settled."
+            exit 0
+          fi
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_${OS}_${ARCH}.tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher login dns --domain focusgts.com --private-key "$MCP_REGISTRY_DNS_KEY"
+          ./mcp-publisher publish
+
+      - name: Registry status
+        run: |
+          echo "npm:           published"
+          echo "MCP Registry:  manual until namespace decided (see step above)"

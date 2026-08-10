@@ -54,10 +54,14 @@ export interface EdsPreviewResponse {
 }
 
 export interface EdsPublishResponse {
-  /** Path that was published */
-  path: string;
-  /** Fully-qualified live URL (*.aem.live) */
-  resourcePath: string;
+  /**
+   * Path that was published. Absent on a 204 No Content response (e.g. an
+   * unpublish/DELETE), which carries no body — callers fall back to the
+   * requested path.
+   */
+  path?: string;
+  /** Fully-qualified live URL (*.aem.live). Absent on a 204 response. */
+  resourcePath?: string;
   /** HTTP status code */
   status: number;
   /** Additional links returned by the API */
@@ -65,8 +69,8 @@ export interface EdsPublishResponse {
 }
 
 export interface EdsCacheResponse {
-  /** Path whose cache was purged */
-  path: string;
+  /** Path whose cache was purged. Absent on a 204 No Content response. */
+  path?: string;
   /** HTTP status code of the purge request */
   status: number;
   /** Human-readable message from the purge endpoint */
@@ -93,8 +97,11 @@ export interface EdsQueryIndexEntry {
   description: string;
   /** Hero / og:image URL */
   image: string;
-  /** Unix timestamp (seconds) of last modification */
-  lastModified: number;
+  /**
+   * Unix timestamp (seconds) of last modification. Frequently omitted by real
+   * query-index sheets, so treat as optional and render defensively.
+   */
+  lastModified?: number;
 }
 
 export interface EdsQueryIndexResponse {

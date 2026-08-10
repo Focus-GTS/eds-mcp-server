@@ -30,6 +30,25 @@ function errorResult(error: unknown) {
   };
 }
 
+/**
+ * Format a query-index `lastModified` (epoch seconds) as YYYY-MM-DD.
+ *
+ * Real EDS query-index sheets frequently omit this column, leaving the value
+ * `undefined`. `new Date(undefined * 1000).toISOString()` throws
+ * `RangeError: Invalid time value`, which would fail the entire tool call over
+ * one incomplete row — so missing or unparseable values degrade to a dash.
+ */
+function formatModified(lastModified: unknown): string {
+  let seconds =
+    typeof lastModified === 'number' ? lastModified : Number(lastModified);
+  if (!Number.isFinite(seconds) || seconds <= 0) return '—';
+  // Some sheets emit the timestamp in milliseconds; anything past ~year 33658
+  // in seconds is really milliseconds, so normalize it before formatting.
+  if (seconds > 1e12) seconds = seconds / 1000;
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? '—' : date.toISOString().slice(0, 10);
+}
+
 // ---------------------------------------------------------------------------
 // Publishing tools
 // ---------------------------------------------------------------------------
@@ -84,8 +103,10 @@ export async function handleUnpublishPage(
 ) {
   try {
     const result = await client.unpublishPage(args.path);
+    // A 204 No Content response carries no body, so `result.path` is undefined;
+    // fall back to the path the caller asked to unpublish.
     const lines = [
-      `Unpublished ${result.path}`,
+      `Unpublished ${result.path ?? args.path}`,
       `Status: ${result.status}`,
     ];
     return textResult(lines.join('\n'));
@@ -128,8 +149,9 @@ export async function handlePurgeCache(
 ) {
   try {
     const result = await client.purgeCache(args.path);
+    // 204 responses carry no body; fall back to the requested path.
     const lines = [
-      `Cache purged for ${result.path}`,
+      `Cache purged for ${result.path ?? args.path}`,
       `Status: ${result.status}`,
     ];
     if (result.message) {
@@ -168,7 +190,7 @@ export async function handleListPages(
       '',
     ];
     for (const entry of index.data) {
-      const modified = new Date(entry.lastModified * 1000).toISOString().slice(0, 10);
+      const modified = formatModified(entry.lastModified);
       lines.push(`  ${entry.path}  —  ${entry.title}  (${modified})`);
     }
     return textResult(lines.join('\n'));
@@ -483,7 +505,7 @@ export async function handleSearchPages(
 
     const lines = [`Search results for "${args.query}": ${index.total} matches (showing ${index.data.length})`, ''];
     for (const entry of index.data) {
-      const modified = new Date(entry.lastModified * 1000).toISOString().slice(0, 10);
+      const modified = formatModified(entry.lastModified);
       lines.push(`  ${entry.path}  —  ${entry.title}  (${modified})`);
       if (entry.description) {
         lines.push(`    ${entry.description.slice(0, 100)}${entry.description.length > 100 ? '...' : ''}`);

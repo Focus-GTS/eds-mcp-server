@@ -27,6 +27,33 @@ import type {
 } from './types.js';
 import { getValidToken } from '../auth/index.js';
 
+/** Query parameters whose values are secrets and must never reach a caller. */
+const SECRET_QUERY_PARAMS = ['domainkey', 'domainKey'];
+
+/**
+ * Redact secret query parameters from a URL before it goes into an error
+ * message. `EDS_DOMAIN_KEY` is carried as the `domainkey` query param on RUM
+ * requests; without this it would surface verbatim to the MCP client and its
+ * logs on any failed CWV/404/experiment call.
+ */
+function redactUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    let redacted = false;
+    for (const key of SECRET_QUERY_PARAMS) {
+      if (u.searchParams.has(key)) {
+        // Plain token, not "<redacted>": URL serialization percent-encodes the
+        // angle brackets into %3C…%3E, which reads like a real value.
+        u.searchParams.set(key, 'REDACTED');
+        redacted = true;
+      }
+    }
+    return redacted ? u.toString() : raw;
+  } catch {
+    return raw;
+  }
+}
+
 export class EdsClient {
   private readonly owner: string;
   private readonly repo: string;
@@ -50,13 +77,40 @@ export class EdsClient {
   // Helpers
   // -------------------------------------------------------------------------
 
-  /** Strip leading slashes and reject path traversal attempts. */
+  /**
+   * Strip leading slashes, reject path traversal, and percent-encode each
+   * segment so it cannot alter the request target.
+   *
+   * A blocklist that only rejects literal `..`/`.` segments is bypassable:
+   * the WHATWG URL parser collapses percent-encoded (`%2e%2e`) and
+   * backslash-separated dot segments, and bare `?`/`#` inject a query or
+   * fragment. Because the admin token is scoped to the user's identity across
+   * every site they can reach — not to one repo — such a bypass would let a
+   * request escape the intended `/{verb}/{owner}/{repo}/{ref}/` prefix and act
+   * on another site. So we decode each segment to catch disguised traversal,
+   * then re-encode it. `encodeURIComponent` leaves `.` untouched, so legitimate
+   * paths like `blog/post-1` and `foo.plain.html` are unchanged.
+   */
   private normalizePath(path: string): string {
     const cleaned = path.replace(/^\/+/, '');
-    if (cleaned.split('/').some((seg) => seg === '..' || seg === '.')) {
-      throw new Error(`Invalid path: traversal segments are not allowed — ${path}`);
-    }
-    return cleaned;
+    return cleaned
+      .split('/')
+      .map((seg) => {
+        let decoded: string;
+        try {
+          decoded = decodeURIComponent(seg);
+        } catch {
+          decoded = seg;
+        }
+        if (decoded === '..' || decoded === '.') {
+          throw new Error(`Invalid path: traversal segments are not allowed — ${path}`);
+        }
+        if (/[\\/]/.test(decoded)) {
+          throw new Error(`Invalid path: illegal separator inside a segment — ${path}`);
+        }
+        return encodeURIComponent(decoded);
+      })
+      .join('/');
   }
 
   /** Build the AEM Live content origin for this site. */
@@ -105,8 +159,13 @@ export class EdsClient {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
+      // Redact the URL's secret params, and also scrub the domain key from the
+      // response body in case the upstream service echoes it back verbatim.
+      const safeBody = this.domainKey
+        ? body.split(this.domainKey).join('REDACTED')
+        : body;
       throw new Error(
-        `EDS API error: ${response.status} ${response.statusText} — ${url}\n${body}`,
+        `EDS API error: ${response.status} ${response.statusText} — ${redactUrl(url)}\n${safeBody}`,
       );
     }
 

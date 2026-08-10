@@ -143,6 +143,26 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
       res: ServerResponse,
     ): Promise<void> {
       try {
+        // The callback may be reachable on a LAN address (the server binds the
+        // unspecified address so `localhost` resolves on both IPv4 and IPv6).
+        // Only the local machine's own browser should ever reach it, so reject
+        // anything that isn't a loopback client outright.
+        if (!isLoopbackRequest(req)) {
+          // Not settling here: a stray LAN probe during a real login must not
+          // abort it. But log it, so a container user (browser on host, server
+          // in the container → a bridge IP, not loopback) can see why sign-in
+          // never completes instead of hitting the misleading 120s timeout.
+          process.stderr.write(
+            `\nRejected a non-loopback callback from ${req.socket.remoteAddress ?? 'unknown'}. ` +
+              'Login only accepts connections from this machine; a containerized ' +
+              'server cannot receive the host browser callback — run login on the host ' +
+              'or set EDS_API_KEY instead.\n',
+          );
+          res.statusCode = 403;
+          res.end('Forbidden');
+          return;
+        }
+
         const url = new URL(req.url ?? '/', 'http://localhost');
         if (url.pathname !== CALLBACK_PATH) {
           res.statusCode = 404;
@@ -163,13 +183,19 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
         const fields = await collectFields(req, url);
         logReceived(fields);
 
-        // CSRF defence: returned state (if any) must match our nonce.
+        // CSRF defence: the returned state MUST be present and match our nonce.
+        // Adobe's flow always echoes `state` back (per the adobe/helix-cli
+        // contract this mirrors), so a missing state is not a legitimate
+        // callback — accepting one would let any page POST a token of its
+        // choosing into the cache (token injection / session fixation).
         const returnedState = fields.state;
-        if (returnedState && returnedState !== state) {
+        if (returnedState !== state) {
           res.statusCode = 400;
-          res.end(errorHtml('State mismatch — possible CSRF. Please retry login.'));
+          res.end(errorHtml('State missing or mismatched — possible CSRF. Please retry login.'));
           settle(() =>
-            reject(new Error('Login failed: state nonce did not match (possible CSRF).')),
+            reject(
+              new Error('Login failed: state nonce missing or did not match (possible CSRF).'),
+            ),
           );
           return;
         }
@@ -385,6 +411,19 @@ function logReceived(fields: Record<string, string>): void {
 
 function asError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
+}
+
+/**
+ * True only when the request originates from this machine's loopback interface.
+ * Covers IPv4 loopback (127.0.0.0/8), IPv6 loopback (::1), and IPv4-mapped IPv6
+ * (`::ffff:127.x.x.x`).
+ */
+function isLoopbackRequest(req: IncomingMessage): boolean {
+  const addr = req.socket.remoteAddress;
+  if (!addr) return false;
+  if (addr === '::1') return true;
+  const v4 = addr.startsWith('::ffff:') ? addr.slice('::ffff:'.length) : addr;
+  return /^127\./.test(v4);
 }
 
 // ---------------------------------------------------------------------------
