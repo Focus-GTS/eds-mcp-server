@@ -1,6 +1,6 @@
 {
   "name": "@focusgts/eds-mcp-server",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "mcpName": "io.github.focusgts/eds-mcp-server",
   "description": "MCP server for Adobe Edge Delivery Services — preview, publish, metrics, and content operations",
   "license": "Apache-2.0",
@@ -34,7 +34,11 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "lint": "eslint src/",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "sync-version": "node scripts/sync-version.mjs",
+    "version": "npm run sync-version && git add server.json",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
