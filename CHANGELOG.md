@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-11
+
 ### Added
 - `eds_get_job_status` tool to poll the progress of an asynchronous bulk job.
 - `logout` CLI subcommand to clear the cached admin token.
