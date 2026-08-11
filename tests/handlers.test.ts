@@ -17,6 +17,7 @@ import {
   handleGetApiKeys,
   handleBulkPreview,
   handleBulkPublish,
+  handleGetJobStatus,
   handlePreviewAndPublish,
   handleGetRedirects,
   handleSearchPages,
@@ -40,8 +41,9 @@ function mockClient(overrides: Partial<EdsClient> = {}): EdsClient {
     getConfig: vi.fn().mockResolvedValue({ cdn: { prod: { host: 'example.com' } } }),
     getLogs: vi.fn().mockResolvedValue([{ timestamp: '2026-05-19T10:00:00Z', action: 'publish', path: '/about', user: 'dave@focusgts.com' }]),
     getApiKeys: vi.fn().mockResolvedValue([{ id: 'key-1', name: 'CI Key', role: 'publish', createdAt: '2026-05-01' }]),
-    bulkPreview: vi.fn().mockResolvedValue({ succeeded: ['/about', '/blog'], failed: [] }),
-    bulkPublish: vi.fn().mockResolvedValue({ succeeded: ['/about'], failed: [] }),
+    bulkPreview: vi.fn().mockResolvedValue({ topic: 'preview', name: 'job-1', state: 'created', pathCount: 2 }),
+    bulkPublish: vi.fn().mockResolvedValue({ topic: 'publish', name: 'job-2', state: 'created', pathCount: 1 }),
+    getJobStatus: vi.fn().mockResolvedValue({ topic: 'preview', name: 'job-1', state: 'stopped', progress: { total: 2, processed: 2, failed: 0 } }),
     previewAndPublish: vi.fn().mockResolvedValue({
       preview: { path: '/about', status: 200, resourcePath: 'https://main--site--org.aem.page/about' },
       publish: { path: '/about', status: 200, resourcePath: 'https://main--site--org.aem.live/about' },
@@ -183,30 +185,49 @@ describe('Configuration handlers', () => {
 });
 
 describe('Bulk operation handlers', () => {
-  it('handleBulkPreview returns success count', async () => {
+  it('handleBulkPreview starts a job and points at the poll tool', async () => {
     const client = mockClient();
     const result = await handleBulkPreview(client, { paths: ['/about', '/blog'] });
-    expect(result.content[0].text).toContain('2 succeeded');
-    expect(result.content[0].text).toContain('0 failed');
+    expect(result).not.toHaveProperty('isError');
+    expect(result.content[0].text).toContain('Bulk preview job started');
+    expect(result.content[0].text).toContain('2 paths queued');
+    expect(result.content[0].text).toContain('preview/job-1');
+    expect(result.content[0].text).toContain('eds_get_job_status');
   });
 
-  it('handleBulkPreview reports failures', async () => {
-    const client = mockClient({
-      bulkPreview: vi.fn().mockResolvedValue({
-        succeeded: ['/about'],
-        failed: [{ path: '/missing', error: '404 Not Found' }],
-      }),
-    });
-    const result = await handleBulkPreview(client, { paths: ['/about', '/missing'] });
-    expect(result.content[0].text).toContain('1 succeeded');
-    expect(result.content[0].text).toContain('1 failed');
-    expect(result.content[0].text).toContain('404');
+  it('handleBulkPreview forwards forceUpdate to the client', async () => {
+    const bulkPreview = vi.fn().mockResolvedValue({ topic: 'preview', name: 'j', state: 'created', pathCount: 1 });
+    const client = mockClient({ bulkPreview });
+    await handleBulkPreview(client, { paths: ['/about'], forceUpdate: true });
+    expect(bulkPreview).toHaveBeenCalledWith(['/about'], { forceUpdate: true });
   });
 
-  it('handleBulkPublish returns success count', async () => {
+  it('handleBulkPublish starts a publish job', async () => {
     const client = mockClient();
     const result = await handleBulkPublish(client, { paths: ['/about'] });
-    expect(result.content[0].text).toContain('1 succeeded');
+    expect(result.content[0].text).toContain('Bulk publish job started');
+    expect(result.content[0].text).toContain('publish/job-2');
+  });
+
+  it('handleGetJobStatus reports progress and finished state', async () => {
+    const client = mockClient();
+    const result = await handleGetJobStatus(client, { topic: 'preview', name: 'job-1' });
+    expect(result.content[0].text).toContain('state: stopped');
+    expect(result.content[0].text).toContain('finished');
+    expect(result.content[0].text).toContain('2/2 processed');
+  });
+
+  it('handleGetJobStatus shows in-progress jobs with failures', async () => {
+    const client = mockClient({
+      getJobStatus: vi.fn().mockResolvedValue({
+        topic: 'publish', name: 'job-9', state: 'running',
+        progress: { total: 10, processed: 4, failed: 1 },
+      }),
+    });
+    const result = await handleGetJobStatus(client, { topic: 'publish', name: 'job-9' });
+    expect(result.content[0].text).toContain('in progress');
+    expect(result.content[0].text).toContain('4/10 processed');
+    expect(result.content[0].text).toContain('1 failed');
   });
 
   it('handlePreviewAndPublish returns both results', async () => {
@@ -346,6 +367,77 @@ describe('EdsClient secret redaction', () => {
       domainKey: 'super-secret-domain-key',
     });
     await expect(client.getCwv('example.com')).rejects.not.toThrow('super-secret-domain-key');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('EdsClient bulk job API (wire contract)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('bulkPreview POSTs paths to /preview/{owner}/{repo}/{ref}/* and parses the 202 job', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({
+        status: 202,
+        job: { topic: 'preview', name: 'job-abc', state: 'created' },
+        links: { self: 'https://admin.hlx.page/job/o/r/main/preview/job-abc' },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const job = await client.bulkPreview(['/a', '/b'], { forceUpdate: true });
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://admin.hlx.page/preview/o/r/main/*');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ paths: ['/a', '/b'], forceUpdate: true });
+    expect(job).toMatchObject({ topic: 'preview', name: 'job-abc', state: 'created', pathCount: 2 });
+    vi.unstubAllGlobals();
+  });
+
+  it('bulkPublish POSTs to /live/{owner}/{repo}/{ref}/* and reports the publish topic', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ status: 202, job: { topic: 'publish', name: 'job-9', state: 'created' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const job = await client.bulkPublish(['/a']);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.hlx.page/live/o/r/main/*');
+    expect(job.topic).toBe('publish');
+    vi.unstubAllGlobals();
+  });
+
+  it('getJobStatus GETs the details endpoint and returns the parsed status', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({
+        topic: 'preview', name: 'job-abc', state: 'stopped',
+        progress: { total: 2, processed: 2, failed: 0 },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const status = await client.getJobStatus('preview', 'job-abc');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.hlx.page/job/o/r/main/preview/job-abc/details');
+    expect(status.state).toBe('stopped');
+    expect(status.progress?.processed).toBe(2);
     vi.unstubAllGlobals();
   });
 });

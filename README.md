@@ -10,7 +10,7 @@
 
 ### Let an AI agent run your Adobe Edge Delivery site.
 
-**20 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**21 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 ![Ask your agent](https://readme-typing-svg.demolab.com/?font=JetBrains+Mono&size=20&duration=2600&pause=800&color=6E56CF&center=true&vCenter=true&width=640&height=42&lines=%22Preview+and+publish+the+homepage%22;%22What+are+the+Core+Web+Vitals%3F%22;%22Find+pages+missing+a+description%22;%22Publish+all+the+blog+posts%22)
@@ -39,7 +39,7 @@ That's it — no local AEM, no scripts, no glue code.
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>20 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>21 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -72,7 +72,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 20 tools
+## 🛠️ The 21 tools
 
 <table>
 <tr><td valign="top" width="33%">
@@ -86,6 +86,7 @@ sequenceDiagram
 - `eds_purge_cache`
 - `eds_bulk_preview`
 - `eds_bulk_publish`
+- `eds_get_job_status`
 
 </td><td valign="top" width="33%">
 

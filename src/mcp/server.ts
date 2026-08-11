@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 20 EDS tools registered.
+ * Creates a {@link McpServer} instance with all 21 EDS tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -243,28 +243,52 @@ export function createServer(options: EdsClientOptions): McpServer {
 
   server.tool(
     'eds_bulk_preview',
-    'Preview multiple EDS pages in a single operation. Use when updating a section of the site or after a content migration.',
+    'Start an asynchronous bulk preview job over many pages in one call. Returns a job handle immediately; poll eds_get_job_status for progress. Use for section updates or content migrations.',
     {
       paths: z
         .array(edsPath)
         .min(1)
-        .max(100)
+        .max(1000)
         .describe('Array of page paths to preview (e.g., ["/blog/post-1", "/blog/post-2"])'),
+      forceUpdate: z
+        .boolean()
+        .optional()
+        .describe('Re-process every path even if unchanged (default: only new/modified)'),
     },
     async (args) => handlers.handleBulkPreview(client, args),
   );
 
   server.tool(
     'eds_bulk_publish',
-    'Publish multiple EDS pages from preview to the live production domain in a single operation',
+    'Start an asynchronous bulk publish job from preview to the live production domain over many pages in one call. Returns a job handle immediately; poll eds_get_job_status for progress.',
     {
       paths: z
         .array(edsPath)
         .min(1)
-        .max(100)
+        .max(1000)
         .describe('Array of page paths to publish (e.g., ["/blog/post-1", "/blog/post-2"])'),
+      forceUpdate: z
+        .boolean()
+        .optional()
+        .describe('Re-process every path even if unchanged (default: only new/modified)'),
     },
     async (args) => handlers.handleBulkPublish(client, args),
+  );
+
+  server.tool(
+    'eds_get_job_status',
+    'Check the progress of an asynchronous bulk job started by eds_bulk_preview or eds_bulk_publish. Reports state (created/running/stopped) and processed/failed counts.',
+    {
+      topic: z
+        .string()
+        .min(1)
+        .describe('Job topic returned by the bulk operation (e.g., "preview" or "publish")'),
+      name: z
+        .string()
+        .min(1)
+        .describe('Job name returned by the bulk operation'),
+    },
+    async (args) => handlers.handleGetJobStatus(client, args),
   );
 
   server.tool(

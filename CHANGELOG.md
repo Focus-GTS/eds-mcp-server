@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `eds_get_job_status` tool to poll the progress of an asynchronous bulk job.
+
+### Changed
+- **Bulk preview/publish are now asynchronous jobs.** `eds_bulk_preview` and
+  `eds_bulk_publish` use the Admin API's native bulk endpoints
+  (`POST /preview|live/{owner}/{repo}/{ref}/*` with a `{ paths }` body), which
+  queue one server-side job and return a handle immediately, instead of looping
+  one request per path. This removes the client-timeout ceiling on large
+  batches; the per-page cap is raised from 100 to 1000 and a `forceUpdate`
+  option is exposed. Track completion with `eds_get_job_status`.
+
 ## [0.3.2] - 2026-08-10
 
 ### Security

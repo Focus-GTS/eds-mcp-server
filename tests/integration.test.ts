@@ -55,7 +55,7 @@ describe.skipIf(!LIVE)('Integration: Admin API (read-only, no auth)', () => {
 });
 
 describe('Integration: MCP Server creation', () => {
-  it('creates a server with all 20 tools', async () => {
+  it('creates a server with all 21 tools', async () => {
     const { createServer } = await import('../src/mcp/server.js');
     const server = createServer({ owner: 'adobe', repo: 'helix-website' });
     expect(server).toBeDefined();

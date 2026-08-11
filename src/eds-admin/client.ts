@@ -22,10 +22,25 @@ import type {
   EdsLogEntry,
   EdsApiKey,
   EdsClientOptions,
-  EdsBulkResult,
+  EdsBulkJob,
+  EdsJobStatus,
   EdsRedirectEntry,
 } from './types.js';
 import { getValidToken } from '../auth/index.js';
+
+/** Raw 202 response from the bulk preview/publish endpoints. */
+interface EdsBulkJobResponse {
+  status?: number;
+  messageId?: string;
+  job?: {
+    topic?: string;
+    name?: string;
+    state?: string;
+    startTime?: string;
+    data?: { paths?: string[] };
+  };
+  links?: { self?: string; list?: string };
+}
 
 /** Query parameters whose values are secrets and must never reach a caller. */
 const SECRET_QUERY_PARAMS = ['domainkey', 'domainKey'];
@@ -523,49 +538,80 @@ export class EdsClient {
   // -------------------------------------------------------------------------
 
   /**
-   * Preview multiple pages in sequence.
+   * Start a bulk preview job — POST /preview/{owner}/{repo}/{ref}/* with a
+   * `{ paths }` body. The Admin API queues one asynchronous job over every
+   * path and returns a 202 immediately; poll {@link getJobStatus} for progress.
    *
-   * POST /preview/{owner}/{repo}/{ref}/{path} for each path.
+   * This replaces the old per-path loop, which serialized N requests and blew
+   * past client timeouts on large batches.
    */
-  async bulkPreview(paths: string[]): Promise<EdsBulkResult> {
-    const result: EdsBulkResult = { succeeded: [], failed: [] };
-
-    for (const path of paths) {
-      try {
-        await this.previewPage(path);
-        result.succeeded.push(path);
-      } catch (error) {
-        result.failed.push({
-          path,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    return result;
+  async bulkPreview(
+    paths: string[],
+    options?: { forceUpdate?: boolean },
+  ): Promise<EdsBulkJob> {
+    return this.startBulkJob('preview', paths, options);
   }
 
   /**
-   * Publish multiple pages in sequence.
-   *
-   * POST /live/{owner}/{repo}/{ref}/{path} for each path.
+   * Start a bulk publish job — POST /live/{owner}/{repo}/{ref}/* with a
+   * `{ paths }` body. Asynchronous; poll {@link getJobStatus} for progress.
    */
-  async bulkPublish(paths: string[]): Promise<EdsBulkResult> {
-    const result: EdsBulkResult = { succeeded: [], failed: [] };
+  async bulkPublish(
+    paths: string[],
+    options?: { forceUpdate?: boolean },
+  ): Promise<EdsBulkJob> {
+    return this.startBulkJob('live', paths, options);
+  }
 
-    for (const path of paths) {
-      try {
-        await this.publishPage(path);
-        result.succeeded.push(path);
-      } catch (error) {
-        result.failed.push({
-          path,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+  /** Shared implementation for the two bulk endpoints. */
+  private async startBulkJob(
+    verb: 'preview' | 'live',
+    paths: string[],
+    options?: { forceUpdate?: boolean },
+  ): Promise<EdsBulkJob> {
+    const url = `${this.adminBase}/${verb}/${this.owner}/${this.repo}/${this.ref}/*`;
+    const body: Record<string, unknown> = { paths };
+    if (options?.forceUpdate !== undefined) {
+      body.forceUpdate = options.forceUpdate;
     }
 
-    return result;
+    const headers = {
+      ...(await this.resolveAdminHeaders()),
+      'Content-Type': 'application/json',
+    };
+
+    const res = await this.request<EdsBulkJobResponse>(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    const job = res.job ?? {};
+    return {
+      // The publish endpoint is /live/* but its job topic is "publish".
+      topic: job.topic ?? (verb === 'live' ? 'publish' : 'preview'),
+      name: job.name ?? '',
+      state: job.state ?? 'created',
+      startTime: job.startTime,
+      pathCount: paths.length,
+      self: res.links?.self,
+    };
+  }
+
+  /**
+   * Poll a bulk job's progress.
+   *
+   * GET /job/{owner}/{repo}/{ref}/{topic}/{name}/details
+   */
+  async getJobStatus(topic: string, name: string): Promise<EdsJobStatus> {
+    const url = `${this.adminBase}/job/${this.owner}/${this.repo}/${this.ref}/${encodeURIComponent(
+      topic,
+    )}/${encodeURIComponent(name)}/details`;
+
+    return this.request<EdsJobStatus>(url, {
+      method: 'GET',
+      headers: await this.resolveAdminHeaders(),
+    });
   }
 
   /**
