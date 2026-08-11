@@ -113,6 +113,11 @@ export interface EdsQueryIndexResponse {
   limit: number;
   /** Array of index entries */
   data: EdsQueryIndexEntry[];
+  /**
+   * Set by search when the index exceeded the scan cap, so some matches beyond
+   * the cap may be missing. Absent/false means the whole index was scanned.
+   */
+  truncated?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,11 +223,46 @@ export interface EdsApiKey {
 // Bulk operations
 // ---------------------------------------------------------------------------
 
-export interface EdsBulkResult {
-  /** Paths that were successfully processed */
-  succeeded: string[];
-  /** Paths that failed, with error messages */
-  failed: Array<{ path: string; error: string }>;
+/**
+ * A bulk job accepted by the Admin API (202 response). Bulk preview/publish are
+ * asynchronous: one call queues a server-side job over many paths, and progress
+ * is polled separately via {@link EdsJobStatus}.
+ */
+export interface EdsBulkJob {
+  /** Job topic — "preview" or "publish" — used when polling status. */
+  topic: string;
+  /** Server-assigned job name, used when polling status. */
+  name: string;
+  /** Lifecycle state: "created", "running", or "stopped" (finished). */
+  state: string;
+  /** ISO-8601 time the job started, when provided. */
+  startTime?: string;
+  /** Number of paths submitted in this job. */
+  pathCount: number;
+  /** Absolute URL to poll this job, when the API returns one. */
+  self?: string;
+}
+
+/** Progress of a bulk job, from GET /job/.../{topic}/{name}[/details]. */
+export interface EdsJobStatus {
+  /** Job topic — "preview" or "publish". */
+  topic: string;
+  /** Job name. */
+  name: string;
+  /** Lifecycle state: "created", "running", or "stopped" (finished). */
+  state: string;
+  /** ISO-8601 time the job started, when provided. */
+  startTime?: string;
+  /** Progress counters, when the API reports them. */
+  progress?: {
+    total?: number;
+    processed?: number;
+    failed?: number;
+  };
+  /** Per-job detail (paths in the batch), present on the /details response. */
+  data?: {
+    paths?: string[];
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -253,4 +293,8 @@ export interface EdsClientOptions {
   apiKey?: string;
   /** Domain key used for RUM / analytics queries */
   domainKey?: string;
+  /** Max automatic retries on 429/503 responses (default 3). */
+  maxRetries?: number;
+  /** Base backoff in ms between retries (default 500). Set 0 in tests. */
+  retryBaseMs?: number;
 }

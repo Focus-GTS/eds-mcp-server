@@ -22,10 +22,31 @@ import type {
   EdsLogEntry,
   EdsApiKey,
   EdsClientOptions,
-  EdsBulkResult,
+  EdsBulkJob,
+  EdsJobStatus,
   EdsRedirectEntry,
 } from './types.js';
-import { getValidToken } from '../auth/index.js';
+import { getValidToken, clearToken, NEEDS_LOGIN_MESSAGE } from '../auth/index.js';
+import { EdsApiError } from '../utils/errors.js';
+
+/** Sleep for `ms` milliseconds. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Raw 202 response from the bulk preview/publish endpoints. */
+interface EdsBulkJobResponse {
+  status?: number;
+  messageId?: string;
+  job?: {
+    topic?: string;
+    name?: string;
+    state?: string;
+    startTime?: string;
+    data?: { paths?: string[] };
+  };
+  links?: { self?: string; list?: string };
+}
 
 /** Query parameters whose values are secrets and must never reach a caller. */
 const SECRET_QUERY_PARAMS = ['domainkey', 'domainKey'];
@@ -60,6 +81,8 @@ export class EdsClient {
   private readonly ref: string;
   private readonly apiKey?: string;
   private readonly domainKey?: string;
+  private readonly maxRetries: number;
+  private readonly retryBaseMs: number;
 
   private readonly adminBase = 'https://admin.hlx.page';
   private readonly rumQueryBase =
@@ -71,6 +94,8 @@ export class EdsClient {
     this.ref = options.ref ?? 'main';
     this.apiKey = options.apiKey;
     this.domainKey = options.domainKey;
+    this.maxRetries = options.maxRetries ?? 3;
+    this.retryBaseMs = options.retryBaseMs ?? 500;
   }
 
   // -------------------------------------------------------------------------
@@ -113,6 +138,30 @@ export class EdsClient {
       .join('/');
   }
 
+  /**
+   * Normalize a path for a bulk-job *body* (not a URL). The Admin API requires
+   * bulk paths to be absolute (leading `/`), so we ensure one and apply the
+   * same traversal guard as {@link normalizePath} — but we do NOT percent-encode,
+   * because these are JSON body values the server resolves itself, not URL path
+   * segments. Without this, `eds_bulk_publish(["about"])` would send a relative
+   * path the API rejects, even though `eds_publish_page("about")` works.
+   */
+  private normalizeBulkPath(path: string): string {
+    const cleaned = path.replace(/^\/+/, '');
+    for (const seg of cleaned.split('/')) {
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(seg);
+      } catch {
+        decoded = seg;
+      }
+      if (decoded === '..' || decoded === '.') {
+        throw new Error(`Invalid path: traversal segments are not allowed — ${path}`);
+      }
+    }
+    return `/${cleaned}`;
+  }
+
   /** Build the AEM Live content origin for this site. */
   private get contentOrigin(): string {
     return `https://${this.ref}--${this.repo}--${this.owner}.aem.live`;
@@ -152,23 +201,33 @@ export class EdsClient {
     url: string,
     options?: RequestInit,
   ): Promise<T> {
-    const response = await fetch(url, {
-      ...options,
-      signal: AbortSignal.timeout(EdsClient.REQUEST_TIMEOUT_MS),
-    });
+    for (let attempt = 0; ; attempt++) {
+      const response = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(EdsClient.REQUEST_TIMEOUT_MS),
+      });
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => '(no body)');
-      // Redact the URL's secret params, and also scrub the domain key from the
-      // response body in case the upstream service echoes it back verbatim.
-      const safeBody = this.domainKey
-        ? body.split(this.domainKey).join('REDACTED')
-        : body;
-      throw new Error(
-        `EDS API error: ${response.status} ${response.statusText} — ${redactUrl(url)}\n${safeBody}`,
-      );
+      if (response.ok) {
+        return this.parseOk<T>(response);
+      }
+
+      // Retry transient overloads, but never risk duplicating a write:
+      // - 429 (Too Many Requests) means the request was NOT processed → safe to
+      //   retry for any method.
+      // - 503 is ambiguous for a non-idempotent write (a bulk publish POST may
+      //   have been accepted before the gateway returned 503) → retry 503 only
+      //   for idempotent methods, so a POST can't enqueue duplicate jobs.
+      if (attempt < this.maxRetries && this.isRetryable(response, options)) {
+        await sleep(this.retryDelayMs(response, attempt));
+        continue;
+      }
+
+      await this.throwForStatus(response, url, options);
     }
+  }
 
+  /** Parse a successful (2xx) response into the expected type. */
+  private async parseOk<T>(response: Response): Promise<T> {
     // Some endpoints (DELETE, cache purge) may return 204 No Content.
     const contentType = response.headers.get('content-type') ?? '';
     if (
@@ -184,6 +243,121 @@ export class EdsClient {
 
     // Fall back to returning the raw text wrapped in the expected shape.
     return (await response.text()) as unknown as T;
+  }
+
+  /**
+   * Whether a failed response should be retried. 429 is always safe (the
+   * request was not processed); 503 only for idempotent methods, so a
+   * non-idempotent write (POST) can't be duplicated.
+   */
+  private isRetryable(response: Response, options?: RequestInit): boolean {
+    if (response.status === 429) return true;
+    if (response.status !== 503) return false;
+    const method = (options?.method ?? 'GET').toUpperCase();
+    return (
+      method === 'GET' ||
+      method === 'HEAD' ||
+      method === 'PUT' ||
+      method === 'DELETE' ||
+      method === 'OPTIONS'
+    );
+  }
+
+  /** Compute the backoff delay for a retryable response. */
+  private retryDelayMs(response: Response, attempt: number): number {
+    const header = response.headers.get('retry-after');
+    if (header) {
+      // Retry-After is either a number of seconds or an HTTP date.
+      const seconds = Number(header);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.min(seconds * 1000, 30_000);
+      }
+      const date = Date.parse(header);
+      if (!Number.isNaN(date)) {
+        return Math.min(Math.max(date - Date.now(), 0), 30_000);
+      }
+    }
+    // Exponential backoff with a little jitter so retries don't sync up.
+    const backoff = this.retryBaseMs * 2 ** attempt;
+    const jitter = this.retryBaseMs * 0.25 * Math.random();
+    return Math.min(backoff + jitter, 30_000);
+  }
+
+  /**
+   * Map a non-2xx response to a friendly, typed {@link EdsApiError}.
+   *
+   * 401/403/404/429 get actionable guidance; everything else keeps the raw
+   * status/body (with secrets redacted) for debugging.
+   */
+  private async throwForStatus(
+    response: Response,
+    url: string,
+    options?: RequestInit,
+  ): Promise<never> {
+    const body = await response.text().catch(() => '');
+    // Redact the URL's secret params, and scrub the domain key from the body in
+    // case the upstream service echoes it back verbatim.
+    const safeBody = this.domainKey
+      ? body.split(this.domainKey).join('REDACTED')
+      : body;
+    const safeUrl = redactUrl(url);
+    const wasAuthed = this.hadAuthHeader(options);
+
+    switch (response.status) {
+      case 401: {
+        // The admin token was rejected. If it came from the cache (not the
+        // EDS_API_KEY override), clear it so the next call prompts a re-login.
+        if (wasAuthed && !this.apiKey) {
+          clearToken();
+          throw new EdsApiError(401, NEEDS_LOGIN_MESSAGE, { url: safeUrl });
+        }
+        if (wasAuthed && this.apiKey) {
+          throw new EdsApiError(
+            401,
+            'EDS_API_KEY was rejected (401 Unauthorized). Check the key is current and scoped to this site.',
+            { url: safeUrl },
+          );
+        }
+        break;
+      }
+      case 403:
+        throw new EdsApiError(
+          403,
+          'Access denied (403 Forbidden). Your token is valid but lacks permission for this operation on this site.',
+          { url: safeUrl },
+        );
+      case 404:
+        throw new EdsApiError(
+          404,
+          'Not found (404). The resource may not exist, or may not have been previewed/published yet.',
+          { url: safeUrl },
+        );
+      case 429:
+        throw new EdsApiError(
+          429,
+          'Rate limited by the EDS Admin API (429) after retries. Please retry in a moment.',
+          { url: safeUrl },
+        );
+      default:
+        break;
+    }
+
+    throw new EdsApiError(
+      response.status,
+      `EDS API error: ${response.status} ${response.statusText || ''}`.trim(),
+      { url: safeUrl, details: safeBody || undefined },
+    );
+  }
+
+  /** Whether an outgoing request carried the admin auth header. */
+  private hadAuthHeader(options?: RequestInit): boolean {
+    const headers = options?.headers;
+    if (!headers) return false;
+    if (headers instanceof Headers) return headers.has('x-auth-token');
+    if (Array.isArray(headers)) {
+      return headers.some(([k]) => k.toLowerCase() === 'x-auth-token');
+    }
+    return Object.keys(headers).some((k) => k.toLowerCase() === 'x-auth-token');
   }
 
   // -------------------------------------------------------------------------
@@ -523,49 +697,89 @@ export class EdsClient {
   // -------------------------------------------------------------------------
 
   /**
-   * Preview multiple pages in sequence.
+   * Start a bulk preview job — POST /preview/{owner}/{repo}/{ref}/* with a
+   * `{ paths }` body. The Admin API queues one asynchronous job over every
+   * path and returns a 202 immediately; poll {@link getJobStatus} for progress.
    *
-   * POST /preview/{owner}/{repo}/{ref}/{path} for each path.
+   * This replaces the old per-path loop, which serialized N requests and blew
+   * past client timeouts on large batches.
    */
-  async bulkPreview(paths: string[]): Promise<EdsBulkResult> {
-    const result: EdsBulkResult = { succeeded: [], failed: [] };
-
-    for (const path of paths) {
-      try {
-        await this.previewPage(path);
-        result.succeeded.push(path);
-      } catch (error) {
-        result.failed.push({
-          path,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    return result;
+  async bulkPreview(
+    paths: string[],
+    options?: { forceUpdate?: boolean },
+  ): Promise<EdsBulkJob> {
+    return this.startBulkJob('preview', paths, options);
   }
 
   /**
-   * Publish multiple pages in sequence.
-   *
-   * POST /live/{owner}/{repo}/{ref}/{path} for each path.
+   * Start a bulk publish job — POST /live/{owner}/{repo}/{ref}/* with a
+   * `{ paths }` body. Asynchronous; poll {@link getJobStatus} for progress.
    */
-  async bulkPublish(paths: string[]): Promise<EdsBulkResult> {
-    const result: EdsBulkResult = { succeeded: [], failed: [] };
+  async bulkPublish(
+    paths: string[],
+    options?: { forceUpdate?: boolean },
+  ): Promise<EdsBulkJob> {
+    return this.startBulkJob('live', paths, options);
+  }
 
-    for (const path of paths) {
-      try {
-        await this.publishPage(path);
-        result.succeeded.push(path);
-      } catch (error) {
-        result.failed.push({
-          path,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+  /** Shared implementation for the two bulk endpoints. */
+  private async startBulkJob(
+    verb: 'preview' | 'live',
+    paths: string[],
+    options?: { forceUpdate?: boolean },
+  ): Promise<EdsBulkJob> {
+    const url = `${this.adminBase}/${verb}/${this.owner}/${this.repo}/${this.ref}/*`;
+    const body: Record<string, unknown> = {
+      paths: paths.map((p) => this.normalizeBulkPath(p)),
+    };
+    if (options?.forceUpdate !== undefined) {
+      body.forceUpdate = options.forceUpdate;
     }
 
-    return result;
+    const headers = {
+      ...(await this.resolveAdminHeaders()),
+      'Content-Type': 'application/json',
+    };
+
+    const res = await this.request<EdsBulkJobResponse>(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    const job = res.job ?? {};
+    if (!job.name) {
+      // A 202 with no job handle can't be tracked — fail loudly rather than
+      // hand back an unpollable name that eds_get_job_status would reject.
+      throw new Error(
+        'The bulk request was accepted but the API returned no job handle, so its progress cannot be tracked.',
+      );
+    }
+    return {
+      // The publish endpoint is /live/* but its job topic is "publish".
+      topic: job.topic ?? (verb === 'live' ? 'publish' : 'preview'),
+      name: job.name,
+      state: job.state ?? 'created',
+      startTime: job.startTime,
+      pathCount: paths.length,
+      self: res.links?.self,
+    };
+  }
+
+  /**
+   * Poll a bulk job's progress.
+   *
+   * GET /job/{owner}/{repo}/{ref}/{topic}/{name}/details
+   */
+  async getJobStatus(topic: string, name: string): Promise<EdsJobStatus> {
+    const url = `${this.adminBase}/job/${this.owner}/${this.repo}/${this.ref}/${encodeURIComponent(
+      topic,
+    )}/${encodeURIComponent(name)}/details`;
+
+    return this.request<EdsJobStatus>(url, {
+      method: 'GET',
+      headers: await this.resolveAdminHeaders(),
+    });
   }
 
   /**
@@ -606,8 +820,13 @@ export class EdsClient {
         destination: row.Destination ?? row.destination ?? '',
         type: parseInt(row.Type ?? row.type ?? '301', 10) || 301,
       })).filter((r) => r.source && r.destination);
-    } catch {
-      return [];
+    } catch (error) {
+      // A missing redirects.json (404) legitimately means "no redirects".
+      // Any other failure (auth, network) must surface, not masquerade as empty.
+      if (error instanceof EdsApiError && error.status === 404) {
+        return [];
+      }
+      throw error;
     }
   }
 
@@ -616,16 +835,26 @@ export class EdsClient {
   // -------------------------------------------------------------------------
 
   /**
+   * The query index has no server-side full-text search, so search scans the
+   * index client-side. This caps how many rows are pulled per search to bound
+   * memory/latency; if a site's index exceeds it, matches beyond the cap are
+   * not seen and the result is flagged `truncated`.
+   */
+  private static readonly SEARCH_SCAN_CAP = 5000;
+
+  /**
    * Search pages in the query index by keyword.
    *
-   * Fetches the full query index and filters client-side by title,
-   * description, or path.
+   * Scans up to {@link SEARCH_SCAN_CAP} index rows and filters client-side by
+   * title, description, or path. `offset`/`limit` page through the *matches*
+   * (not the raw index), so callers can walk a large result set.
    */
   async searchPages(
     query: string,
     limit: number = 20,
+    offset: number = 0,
   ): Promise<EdsQueryIndexResponse> {
-    const index = await this.listPages(10000, 0);
+    const index = await this.listPages(EdsClient.SEARCH_SCAN_CAP, 0);
     const q = query.toLowerCase();
 
     const filtered = index.data.filter((entry) =>
@@ -636,9 +865,13 @@ export class EdsClient {
 
     return {
       total: filtered.length,
-      offset: 0,
+      offset,
       limit,
-      data: filtered.slice(0, limit),
+      data: filtered.slice(offset, offset + limit),
+      // The index reports more rows than we scanned — matches may be missing.
+      // Using the API's own `total` is exact and avoids a false positive when a
+      // site happens to have exactly SEARCH_SCAN_CAP rows.
+      truncated: index.total > index.data.length,
     };
   }
 }

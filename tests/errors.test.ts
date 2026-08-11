@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatError } from '../src/utils/errors.js';
+import { formatError, EdsApiError } from '../src/utils/errors.js';
 
 describe('formatError', () => {
   it('formats a standard Error', () => {
@@ -29,5 +29,22 @@ describe('formatError', () => {
     const result = formatError(apiError);
     expect(result).toContain('404');
     expect(result).toContain('Not Found');
+  });
+
+  it('surfaces the underlying cause of a plain Error (previously unreachable)', () => {
+    // A tightened isApiError no longer swallows plain Errors, so the cause of a
+    // network failure (e.g. "fetch failed" caused by ENOTFOUND) is now shown.
+    const err = new Error('fetch failed', { cause: new Error('ENOTFOUND admin.hlx.page') });
+    const result = formatError(err);
+    expect(result).toContain('fetch failed');
+    expect(result).toContain('ENOTFOUND');
+  });
+
+  it('renders an EdsApiError with status and redacted url', () => {
+    const err = new EdsApiError(429, 'Rate limited', { url: 'https://admin.hlx.page/x?domainkey=REDACTED' });
+    const result = formatError(err);
+    expect(result).toContain('429');
+    expect(result).toContain('Rate limited');
+    expect(result).toContain('REDACTED');
   });
 });

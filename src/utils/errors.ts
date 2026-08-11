@@ -10,18 +10,45 @@ interface ApiError {
   status?: number;
   message?: string;
   details?: string;
+  url?: string;
 }
 
+/**
+ * A typed error carrying the HTTP status from an EDS Admin/Content API call, so
+ * callers and {@link formatError} can react to the status (401 → re-login,
+ * 429 → rate limited, etc.) rather than string-matching a message.
+ */
+export class EdsApiError extends Error {
+  readonly status: number;
+  readonly url?: string;
+  readonly details?: string;
+
+  constructor(
+    status: number,
+    message: string,
+    opts?: { url?: string; details?: string },
+  ) {
+    super(message);
+    this.name = 'EdsApiError';
+    this.status = status;
+    this.url = opts?.url;
+    this.details = opts?.details;
+  }
+}
+
+/**
+ * True only for structured API errors — a numeric `status` or a `details`
+ * string. Deliberately does NOT match on `message` alone: every `Error` has a
+ * string message, so matching it would swallow plain errors (e.g. a `fetch`
+ * failure whose real cause lives on `error.cause`) into branch 1 and drop the
+ * cause. See {@link formatError} branch 2.
+ */
 function isApiError(value: unknown): value is ApiError {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
   const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.status === 'number' ||
-    typeof obj.message === 'string' ||
-    typeof obj.details === 'string'
-  );
+  return typeof obj.status === 'number' || typeof obj.details === 'string';
 }
 
 /**
@@ -48,6 +75,10 @@ export function formatError(error: unknown): string {
 
     if (error.details) {
       parts.push(`— ${error.details}`);
+    }
+
+    if (error.url) {
+      parts.push(`(${error.url})`);
     }
 
     if (parts.length > 0) {

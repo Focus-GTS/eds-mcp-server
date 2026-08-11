@@ -49,6 +49,40 @@ function formatModified(lastModified: unknown): string {
   return Number.isNaN(date.getTime()) ? '—' : date.toISOString().slice(0, 10);
 }
 
+/** Render the acceptance of an async bulk job, pointing to the poll tool. */
+function formatJobStarted(
+  label: string,
+  job: import('../eds-admin/types.js').EdsBulkJob,
+): string {
+  const noun = job.pathCount === 1 ? 'path' : 'paths';
+  return [
+    `${label} job started — ${job.pathCount} ${noun} queued (state: ${job.state}).`,
+    `Job: ${job.topic}/${job.name}`,
+    `Track progress with eds_get_job_status(topic: "${job.topic}", name: "${job.name}").`,
+  ].join('\n');
+}
+
+/** Render a bulk job's polled progress. */
+function formatJobStatus(
+  status: import('../eds-admin/types.js').EdsJobStatus,
+): string {
+  const finished = status.state === 'stopped';
+  const lines = [
+    `Job ${status.topic}/${status.name} — state: ${status.state}${finished ? ' (finished)' : ' (in progress)'}`,
+  ];
+  if (status.progress) {
+    const total = status.progress.total ?? status.data?.paths?.length ?? '?';
+    const processed = status.progress.processed ?? 0;
+    const failed = status.progress.failed ?? 0;
+    lines.push(
+      `Progress: ${processed}/${total} processed${failed ? `, ${failed} failed` : ''}`,
+    );
+  } else if (status.data?.paths?.length) {
+    lines.push(`Paths in job: ${status.data.paths.length}`);
+  }
+  return lines.join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Publishing tools
 // ---------------------------------------------------------------------------
@@ -387,27 +421,13 @@ export async function handleGetApiKeys(
 
 export async function handleBulkPreview(
   client: EdsClient,
-  args: { paths: string[] },
+  args: { paths: string[]; forceUpdate?: boolean },
 ) {
   try {
-    const result = await client.bulkPreview(args.paths);
-    const lines = [`Bulk preview: ${result.succeeded.length} succeeded, ${result.failed.length} failed`, ''];
-
-    if (result.succeeded.length > 0) {
-      lines.push('Succeeded:');
-      for (const path of result.succeeded) {
-        lines.push(`  ✓ ${path}`);
-      }
-    }
-
-    if (result.failed.length > 0) {
-      lines.push('', 'Failed:');
-      for (const f of result.failed) {
-        lines.push(`  ✗ ${f.path} — ${f.error}`);
-      }
-    }
-
-    return textResult(lines.join('\n'));
+    const job = await client.bulkPreview(args.paths, {
+      forceUpdate: args.forceUpdate,
+    });
+    return textResult(formatJobStarted('Bulk preview', job));
   } catch (error) {
     return errorResult(error);
   }
@@ -415,27 +435,25 @@ export async function handleBulkPreview(
 
 export async function handleBulkPublish(
   client: EdsClient,
-  args: { paths: string[] },
+  args: { paths: string[]; forceUpdate?: boolean },
 ) {
   try {
-    const result = await client.bulkPublish(args.paths);
-    const lines = [`Bulk publish: ${result.succeeded.length} succeeded, ${result.failed.length} failed`, ''];
+    const job = await client.bulkPublish(args.paths, {
+      forceUpdate: args.forceUpdate,
+    });
+    return textResult(formatJobStarted('Bulk publish', job));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
 
-    if (result.succeeded.length > 0) {
-      lines.push('Published:');
-      for (const path of result.succeeded) {
-        lines.push(`  ✓ ${path}`);
-      }
-    }
-
-    if (result.failed.length > 0) {
-      lines.push('', 'Failed:');
-      for (const f of result.failed) {
-        lines.push(`  ✗ ${f.path} — ${f.error}`);
-      }
-    }
-
-    return textResult(lines.join('\n'));
+export async function handleGetJobStatus(
+  client: EdsClient,
+  args: { topic: string; name: string },
+) {
+  try {
+    const status = await client.getJobStatus(args.topic, args.name);
+    return textResult(formatJobStatus(status));
   } catch (error) {
     return errorResult(error);
   }
@@ -494,16 +512,28 @@ export async function handleGetRedirects(
 
 export async function handleSearchPages(
   client: EdsClient,
-  args: { query: string; limit?: number },
+  args: { query: string; limit?: number; offset?: number },
 ) {
   try {
-    const index = await client.searchPages(args.query, args.limit);
+    const index = await client.searchPages(args.query, args.limit, args.offset);
 
     if (index.data.length === 0) {
-      return textResult(`No pages matching "${args.query}".`);
+      const none = `No pages matching "${args.query}"${index.offset ? ` at offset ${index.offset}` : ''}.`;
+      return textResult(
+        index.truncated
+          ? `${none}\n(Note: the index is large and only the first rows were scanned — some matches may be missing.)`
+          : none,
+      );
     }
 
-    const lines = [`Search results for "${args.query}": ${index.total} matches (showing ${index.data.length})`, ''];
+    const shownTo = index.offset + index.data.length;
+    const lines = [
+      `Search results for "${args.query}": ${index.total} matches (showing ${index.offset + 1}–${shownTo})`,
+      ...(index.truncated
+        ? ['(Note: index scan was capped — some matches beyond the cap may be missing.)']
+        : []),
+      '',
+    ];
     for (const entry of index.data) {
       const modified = formatModified(entry.lastModified);
       lines.push(`  ${entry.path}  —  ${entry.title}  (${modified})`);

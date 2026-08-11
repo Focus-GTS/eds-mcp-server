@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   handlePreviewPage,
   handlePublishPage,
@@ -17,6 +20,7 @@ import {
   handleGetApiKeys,
   handleBulkPreview,
   handleBulkPublish,
+  handleGetJobStatus,
   handlePreviewAndPublish,
   handleGetRedirects,
   handleSearchPages,
@@ -40,8 +44,9 @@ function mockClient(overrides: Partial<EdsClient> = {}): EdsClient {
     getConfig: vi.fn().mockResolvedValue({ cdn: { prod: { host: 'example.com' } } }),
     getLogs: vi.fn().mockResolvedValue([{ timestamp: '2026-05-19T10:00:00Z', action: 'publish', path: '/about', user: 'dave@focusgts.com' }]),
     getApiKeys: vi.fn().mockResolvedValue([{ id: 'key-1', name: 'CI Key', role: 'publish', createdAt: '2026-05-01' }]),
-    bulkPreview: vi.fn().mockResolvedValue({ succeeded: ['/about', '/blog'], failed: [] }),
-    bulkPublish: vi.fn().mockResolvedValue({ succeeded: ['/about'], failed: [] }),
+    bulkPreview: vi.fn().mockResolvedValue({ topic: 'preview', name: 'job-1', state: 'created', pathCount: 2 }),
+    bulkPublish: vi.fn().mockResolvedValue({ topic: 'publish', name: 'job-2', state: 'created', pathCount: 1 }),
+    getJobStatus: vi.fn().mockResolvedValue({ topic: 'preview', name: 'job-1', state: 'stopped', progress: { total: 2, processed: 2, failed: 0 } }),
     previewAndPublish: vi.fn().mockResolvedValue({
       preview: { path: '/about', status: 200, resourcePath: 'https://main--site--org.aem.page/about' },
       publish: { path: '/about', status: 200, resourcePath: 'https://main--site--org.aem.live/about' },
@@ -183,30 +188,49 @@ describe('Configuration handlers', () => {
 });
 
 describe('Bulk operation handlers', () => {
-  it('handleBulkPreview returns success count', async () => {
+  it('handleBulkPreview starts a job and points at the poll tool', async () => {
     const client = mockClient();
     const result = await handleBulkPreview(client, { paths: ['/about', '/blog'] });
-    expect(result.content[0].text).toContain('2 succeeded');
-    expect(result.content[0].text).toContain('0 failed');
+    expect(result).not.toHaveProperty('isError');
+    expect(result.content[0].text).toContain('Bulk preview job started');
+    expect(result.content[0].text).toContain('2 paths queued');
+    expect(result.content[0].text).toContain('preview/job-1');
+    expect(result.content[0].text).toContain('eds_get_job_status');
   });
 
-  it('handleBulkPreview reports failures', async () => {
-    const client = mockClient({
-      bulkPreview: vi.fn().mockResolvedValue({
-        succeeded: ['/about'],
-        failed: [{ path: '/missing', error: '404 Not Found' }],
-      }),
-    });
-    const result = await handleBulkPreview(client, { paths: ['/about', '/missing'] });
-    expect(result.content[0].text).toContain('1 succeeded');
-    expect(result.content[0].text).toContain('1 failed');
-    expect(result.content[0].text).toContain('404');
+  it('handleBulkPreview forwards forceUpdate to the client', async () => {
+    const bulkPreview = vi.fn().mockResolvedValue({ topic: 'preview', name: 'j', state: 'created', pathCount: 1 });
+    const client = mockClient({ bulkPreview });
+    await handleBulkPreview(client, { paths: ['/about'], forceUpdate: true });
+    expect(bulkPreview).toHaveBeenCalledWith(['/about'], { forceUpdate: true });
   });
 
-  it('handleBulkPublish returns success count', async () => {
+  it('handleBulkPublish starts a publish job', async () => {
     const client = mockClient();
     const result = await handleBulkPublish(client, { paths: ['/about'] });
-    expect(result.content[0].text).toContain('1 succeeded');
+    expect(result.content[0].text).toContain('Bulk publish job started');
+    expect(result.content[0].text).toContain('publish/job-2');
+  });
+
+  it('handleGetJobStatus reports progress and finished state', async () => {
+    const client = mockClient();
+    const result = await handleGetJobStatus(client, { topic: 'preview', name: 'job-1' });
+    expect(result.content[0].text).toContain('state: stopped');
+    expect(result.content[0].text).toContain('finished');
+    expect(result.content[0].text).toContain('2/2 processed');
+  });
+
+  it('handleGetJobStatus shows in-progress jobs with failures', async () => {
+    const client = mockClient({
+      getJobStatus: vi.fn().mockResolvedValue({
+        topic: 'publish', name: 'job-9', state: 'running',
+        progress: { total: 10, processed: 4, failed: 1 },
+      }),
+    });
+    const result = await handleGetJobStatus(client, { topic: 'publish', name: 'job-9' });
+    expect(result.content[0].text).toContain('in progress');
+    expect(result.content[0].text).toContain('4/10 processed');
+    expect(result.content[0].text).toContain('1 failed');
   });
 
   it('handlePreviewAndPublish returns both results', async () => {
@@ -317,13 +341,16 @@ describe('EdsClient secret redaction', () => {
         text: () => Promise.resolve('boom'),
       }),
     );
+    const { formatError } = await import('../src/utils/errors.js');
     const client = new EdsClient({
       owner: 'test',
       repo: 'test',
       domainKey: 'super-secret-domain-key',
     });
-    await expect(client.getCwv('example.com')).rejects.toThrow(/REDACTED/);
-    await expect(client.getCwv('example.com')).rejects.not.toThrow('super-secret-domain-key');
+    const err = await client.getCwv('example.com').catch((e) => e);
+    const rendered = formatError(err);
+    expect(rendered).toMatch(/REDACTED/);
+    expect(rendered).not.toContain('super-secret-domain-key');
     vi.unstubAllGlobals();
   });
 
@@ -347,6 +374,361 @@ describe('EdsClient secret redaction', () => {
     });
     await expect(client.getCwv('example.com')).rejects.not.toThrow('super-secret-domain-key');
     vi.unstubAllGlobals();
+  });
+});
+
+describe('EdsClient bulk job API (wire contract)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('bulkPreview POSTs paths to /preview/{owner}/{repo}/{ref}/* and parses the 202 job', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({
+        status: 202,
+        job: { topic: 'preview', name: 'job-abc', state: 'created' },
+        links: { self: 'https://admin.hlx.page/job/o/r/main/preview/job-abc' },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const job = await client.bulkPreview(['/a', '/b'], { forceUpdate: true });
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://admin.hlx.page/preview/o/r/main/*');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ paths: ['/a', '/b'], forceUpdate: true });
+    expect(job).toMatchObject({ topic: 'preview', name: 'job-abc', state: 'created', pathCount: 2 });
+    vi.unstubAllGlobals();
+  });
+
+  it('bulkPublish POSTs to /live/{owner}/{repo}/{ref}/* and reports the publish topic', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ status: 202, job: { topic: 'publish', name: 'job-9', state: 'created' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const job = await client.bulkPublish(['/a']);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.hlx.page/live/o/r/main/*');
+    expect(job.topic).toBe('publish');
+    vi.unstubAllGlobals();
+  });
+
+  it('getJobStatus GETs the details endpoint and returns the parsed status', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({
+        topic: 'preview', name: 'job-abc', state: 'stopped',
+        progress: { total: 2, processed: 2, failed: 0 },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const status = await client.getJobStatus('preview', 'job-abc');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.hlx.page/job/o/r/main/preview/job-abc/details');
+    expect(status.state).toBe('stopped');
+    expect(status.progress?.processed).toBe(2);
+    vi.unstubAllGlobals();
+  });
+});
+
+function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: '',
+    headers: new Headers({ 'content-type': 'application/json', ...headers }),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
+  };
+}
+
+describe('EdsClient error handling', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('retries a 429 with backoff, then succeeds', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, statusText: 'Too Many Requests', headers: new Headers({ 'retry-after': '0' }), text: () => Promise.resolve('slow down') })
+      .mockResolvedValueOnce(jsonResponse(200, { path: '/about', status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', retryBaseMs: 0 });
+    const res = await client.previewPage('/about');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(200);
+  });
+
+  it('gives up after maxRetries on persistent 429 with a friendly message', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', headers: new Headers(), text: () => Promise.resolve('') });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', retryBaseMs: 0, maxRetries: 2 });
+    await expect(client.previewPage('/about')).rejects.toThrow(/Rate limited/);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // initial + 2 retries
+  });
+
+  it('maps a 401 with EDS_API_KEY to a key-rejected message', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', headers: new Headers(), text: () => Promise.resolve('') }));
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'bad' });
+    await expect(client.previewPage('/about')).rejects.toThrow(/EDS_API_KEY was rejected/);
+  });
+
+  it('maps 403 and 404 to actionable messages', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden', headers: new Headers(), text: () => Promise.resolve('') }));
+    let client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    await expect(client.previewPage('/x')).rejects.toThrow(/Access denied/);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', headers: new Headers(), text: () => Promise.resolve('') }));
+    client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    await expect(client.getStatus('/x')).rejects.toThrow(/Not found/);
+  });
+
+  it('getRedirects returns [] on 404 but rethrows other failures', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', headers: new Headers(), text: () => Promise.resolve('') }));
+    let client = new EdsClient({ owner: 'o', repo: 'r' });
+    await expect(client.getRedirects()).resolves.toEqual([]);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: 'Server Error', headers: new Headers(), text: () => Promise.resolve('boom') }));
+    client = new EdsClient({ owner: 'o', repo: 'r' });
+    await expect(client.getRedirects()).rejects.toThrow(/500/);
+  });
+});
+
+describe('EdsClient 401 clears the cached login token', () => {
+  let home: string;
+  let prevHome: string | undefined;
+  beforeEach(() => {
+    prevHome = process.env.HOME;
+    home = mkdtempSync(join(tmpdir(), 'eds-401-'));
+    process.env.HOME = home;
+    vi.unstubAllGlobals();
+  });
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+    rmSync(home, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+  });
+
+  it('a cached-token 401 clears the token and asks the user to re-login', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const { saveToken, loadToken } = await import('../src/auth/token-store.js');
+    saveToken({ token: 'cached', expiresAt: Date.now() + 3_600_000, owner: 'o', repo: 'r', ref: 'main' });
+    expect(loadToken()).not.toBeNull();
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', headers: new Headers(), text: () => Promise.resolve('') }));
+    const client = new EdsClient({ owner: 'o', repo: 'r' }); // no apiKey → uses cache
+    await expect(client.previewPage('/about')).rejects.toThrow(/login/i);
+    expect(loadToken()).toBeNull(); // token was cleared
+  });
+});
+
+describe('searchPages result paging', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('pages through matches with offset/limit and reports total', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const data = [
+      { path: '/blog/a', title: 'Blog A', description: '', image: '', lastModified: 1 },
+      { path: '/blog/b', title: 'Blog B', description: '', image: '', lastModified: 1 },
+      { path: '/blog/c', title: 'Blog C', description: '', image: '', lastModified: 1 },
+      { path: '/about', title: 'About', description: '', image: '', lastModified: 1 },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { total: 4, offset: 0, limit: 5000, data })));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const res = await client.searchPages('blog', 2, 1);
+    expect(res.total).toBe(3);
+    expect(res.offset).toBe(1);
+    expect(res.data.map((d) => d.path)).toEqual(['/blog/b', '/blog/c']);
+  });
+
+  it('flags truncated when the index reports more rows than were scanned', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const data = [{ path: '/a', title: 'a', description: '', image: '', lastModified: 1 }];
+    // total (10) > data.length (1) → the scan didn't see everything.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { total: 10, offset: 0, limit: 5000, data })));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const res = await client.searchPages('nomatch', 20, 0);
+    expect(res.truncated).toBe(true);
+  });
+
+  it('does not flag truncated when the whole index was returned', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const data = [{ path: '/a', title: 'a', description: '', image: '', lastModified: 1 }];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { total: 1, offset: 0, limit: 5000, data })));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const res = await client.searchPages('a', 20, 0);
+    expect(res.truncated).toBe(false);
+  });
+});
+
+describe('bulk path normalization & job-handle safety', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('makes bulk paths absolute (leading slash) in the request body', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(202, { job: { topic: 'publish', name: 'j1', state: 'created' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    await client.bulkPublish(['about', 'blog/post', '/already', '//weird']);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.paths).toEqual(['/about', '/blog/post', '/already', '/weird']);
+  });
+
+  it('rejects a traversal path in a bulk batch', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn());
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    await expect(client.bulkPreview(['a/../b'])).rejects.toThrow(/traversal/);
+  });
+
+  it('throws (not a dead-end handle) when a 202 carries no job name', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(202, { status: 202 })));
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    await expect(client.bulkPublish(['/a'])).rejects.toThrow(/no job handle/i);
+  });
+});
+
+describe('retry is idempotency-aware (no duplicated writes)', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('does NOT retry a POST on 503 (could duplicate a bulk publish)', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503, statusText: 'Unavailable', headers: new Headers(), text: () => Promise.resolve('') });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', retryBaseMs: 0 });
+    await expect(client.bulkPublish(['/a'])).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry
+  });
+
+  it('DOES retry a GET on 503 (idempotent)', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Unavailable', headers: new Headers(), text: () => Promise.resolve('') })
+      .mockResolvedValueOnce(jsonResponse(200, { path: '/a', preview: { status: 200 }, live: { status: 200 } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', retryBaseMs: 0 });
+    await client.getStatus('/a');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('DOES retry a POST on 429 (request was not processed)', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, statusText: 'Too Many', headers: new Headers(), text: () => Promise.resolve('') })
+      .mockResolvedValueOnce(jsonResponse(202, { job: { topic: 'publish', name: 'j', state: 'created' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', retryBaseMs: 0 });
+    await client.bulkPublish(['/a']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('EdsClient read methods (parsing)', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  function textResponse(status: number, body: string, contentType = 'text/plain') {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: '',
+      headers: new Headers({ 'content-type': contentType }),
+      text: () => Promise.resolve(body),
+      json: () => Promise.resolve(JSON.parse(body)),
+    };
+  }
+
+  it('getSitemap parses <url>/<loc>/<lastmod> from XML', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const xml = '<urlset><url><loc>https://x/a</loc><lastmod>2026-01-01</lastmod></url><url><loc>https://x/b</loc></url></urlset>';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, xml, 'application/xml')));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const entries = await client.getSitemap();
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toEqual({ loc: 'https://x/a', lastmod: '2026-01-01' });
+    expect(entries[1]).toEqual({ loc: 'https://x/b' });
+  });
+
+  it('getCwv unwraps the { results: { data } } RUM envelope', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify({ results: { data: [{ url: '/a', lcp: 1, cls: 0, inp: 1, ttfb: 1, pageViews: 1 }] } }), 'application/json')));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const data = await client.getCwv('example.com');
+    expect(data).toHaveLength(1);
+    expect(data[0].url).toBe('/a');
+  });
+
+  it('getPageContent requests the .plain.html rendition and returns the logical path', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue(textResponse(200, '<h1>About</h1>', 'text/html'));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const page = await client.getPageContent('/about');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://main--r--o.aem.live/about.plain.html');
+    expect(page).toEqual({ path: '/about', html: '<h1>About</h1>' });
+  });
+
+  it('getPageContent maps the root path to index.plain.html', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue(textResponse(200, '<h1>Home</h1>', 'text/html'));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    await client.getPageContent('/');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://main--r--o.aem.live/index.plain.html');
+  });
+
+  it('previewAndPublish issues preview then publish', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(textResponse(200, JSON.stringify({ path: '/a', status: 200, resourcePath: 'p' }), 'application/json'))
+      .mockResolvedValueOnce(textResponse(200, JSON.stringify({ path: '/a', status: 200, resourcePath: 'l' }), 'application/json'));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const res = await client.previewAndPublish('/a');
+    expect(fetchMock.mock.calls[0][0]).toContain('/preview/o/r/main/a');
+    expect(fetchMock.mock.calls[1][0]).toContain('/live/o/r/main/a');
+    expect(res.preview.status).toBe(200);
+    expect(res.publish.status).toBe(200);
+  });
+
+  it('getConfig / getLogs / getApiKeys parse their responses', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify({ cdn: { prod: {} } }), 'application/json')));
+    expect(await client.getConfig()).toHaveProperty('cdn');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify([{ timestamp: 't', action: 'publish', path: '/a', user: 'u' }]), 'application/json')));
+    expect(await client.getLogs()).toHaveLength(1);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify({ data: [{ id: '1', name: 'k', role: 'publish', createdAt: 'd' }] }), 'application/json')));
+    expect(await client.getApiKeys()).toHaveLength(1);
   });
 });
 

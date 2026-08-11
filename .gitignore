@@ -6,3 +6,4 @@ ruvector.db
 *.rvf
 *.rvf.lock
 .claude-flow/
+coverage/

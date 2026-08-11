@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 20 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 21 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,14 +16,14 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 20 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 21 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
     types.ts            -- TypeScript interfaces
   utils/
-    url.ts              -- EDS URL construction helpers
-    errors.ts           -- Error formatting
+    errors.ts           -- Error formatting + typed EdsApiError
+  lib.ts                -- Import-safe public library surface (main/types entry)
 ```
 
 ## Environment Variables
@@ -103,8 +103,9 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_get_config` | Site configuration |
 | `eds_get_logs` | Project activity logs |
 | `eds_get_api_keys` | List API keys |
-| `eds_bulk_preview` | Preview multiple pages at once |
-| `eds_bulk_publish` | Publish multiple pages at once |
+| `eds_bulk_preview` | Start an async bulk preview job over many pages |
+| `eds_bulk_publish` | Start an async bulk publish job over many pages |
+| `eds_get_job_status` | Poll the progress of a bulk job |
 | `eds_preview_and_publish` | Preview + publish in one operation |
 | `eds_get_redirects` | Fetch redirect rules |
 | `eds_search_pages` | Search pages by keyword |
