@@ -328,6 +328,9 @@ export function createServer(options: EdsClientOptions): McpServer {
         .max(100)
         .optional()
         .describe('Maximum number of results to return (default 20)'),
+      offset: positiveInt
+        .optional()
+        .describe('Number of matches to skip, for paging through results (default 0)'),
     },
     async (args) => handlers.handleSearchPages(client, args),
   );

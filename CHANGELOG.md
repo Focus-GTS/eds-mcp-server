@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `eds_get_job_status` tool to poll the progress of an asynchronous bulk job.
+- `logout` CLI subcommand to clear the cached admin token.
+- `offset` parameter on `eds_search_pages` to page through match results.
+- Automatic retry with backoff (honoring `Retry-After`) on `429`/`503` responses.
 
 ### Changed
 - **Bulk preview/publish are now asynchronous jobs.** `eds_bulk_preview` and
@@ -18,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one request per path. This removes the client-timeout ceiling on large
   batches; the per-page cap is raised from 100 to 1000 and a `forceUpdate`
   option is exposed. Track completion with `eds_get_job_status`.
+- **Friendlier API errors.** `401` clears the cached login token and prompts a
+  re-login (or flags a rejected `EDS_API_KEY`); `403` explains it is a
+  permission issue; `404` and `429` get actionable messages. Errors are now a
+  typed `EdsApiError` carrying the status.
+- Importing the package no longer starts a server: `main`/`types` point at a new
+  side-effect-free library entry (`lib.ts`); the stdio CLI remains the `bin`.
+
+### Fixed
+- `eds_get_redirects` no longer reports every failure as "no redirects" — only a
+  genuine `404` maps to empty; auth/network errors now surface.
+- Published tarball no longer ships dangling source maps (they resolved to
+  nothing without `src/`).
+
+### Internal
+- Working ESLint (flat config) wired into CI, the release gates, and
+  `prepublishOnly`; test coverage reporting added.
 
 ## [0.3.2] - 2026-08-10
 

@@ -60,4 +60,16 @@ describe('Integration: MCP Server creation', () => {
     const server = createServer({ owner: 'adobe', repo: 'helix-website' });
     expect(server).toBeDefined();
   });
+
+  it('the library entry (lib.ts) is import-safe and exposes the public API', async () => {
+    // Importing the package must NOT start a server or read argv/env — that is
+    // the CLI's job (index.ts). lib.ts is the main/types entry.
+    const lib = await import('../src/lib.js');
+    expect(typeof lib.createServer).toBe('function');
+    expect(typeof lib.EdsClient).toBe('function');
+    expect(typeof lib.login).toBe('function');
+    expect(typeof lib.EdsApiError).toBe('function');
+    const server = lib.createServer({ owner: 'o', repo: 'r' });
+    expect(server).toBeDefined();
+  });
 });

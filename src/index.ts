@@ -19,7 +19,7 @@
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createServer } from './mcp/server.js';
-import { login } from './auth/index.js';
+import { login, clearToken, loadToken, getTokenPath } from './auth/index.js';
 
 /** Parse `--flag value` and `--flag=value` style CLI arguments. */
 function parseFlag(argv: string[], name: string): string | undefined {
@@ -77,8 +77,27 @@ async function runLogin(argv: string[]): Promise<never> {
   }
 }
 
+/**
+ * `logout` subcommand — clear the cached admin token and exit.
+ */
+function runLogout(): never {
+  const path = getTokenPath();
+  const hadToken = loadToken() !== null;
+  clearToken();
+  process.stderr.write(
+    hadToken
+      ? `\nSigned out. Cleared the cached token at ${path}.\n`
+      : `\nNo cached token to clear (${path}).\n`,
+  );
+  process.exit(0);
+}
+
 if (process.argv[2] === 'login') {
   await runLogin(process.argv.slice(3));
+}
+
+if (process.argv[2] === 'logout') {
+  runLogout();
 }
 
 const owner = process.env.EDS_OWNER;

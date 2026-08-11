@@ -99,6 +99,9 @@ jobs:
       - name: CHANGELOG must have an entry for this version
         run: node scripts/extract-changelog.mjs "${GITHUB_REF_NAME}" > /dev/null
 
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npm run typecheck
 

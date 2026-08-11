@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   handlePreviewPage,
   handlePublishPage,
@@ -338,13 +341,16 @@ describe('EdsClient secret redaction', () => {
         text: () => Promise.resolve('boom'),
       }),
     );
+    const { formatError } = await import('../src/utils/errors.js');
     const client = new EdsClient({
       owner: 'test',
       repo: 'test',
       domainKey: 'super-secret-domain-key',
     });
-    await expect(client.getCwv('example.com')).rejects.toThrow(/REDACTED/);
-    await expect(client.getCwv('example.com')).rejects.not.toThrow('super-secret-domain-key');
+    const err = await client.getCwv('example.com').catch((e) => e);
+    const rendered = formatError(err);
+    expect(rendered).toMatch(/REDACTED/);
+    expect(rendered).not.toContain('super-secret-domain-key');
     vi.unstubAllGlobals();
   });
 
@@ -439,6 +445,215 @@ describe('EdsClient bulk job API (wire contract)', () => {
     expect(status.state).toBe('stopped');
     expect(status.progress?.processed).toBe(2);
     vi.unstubAllGlobals();
+  });
+});
+
+function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: '',
+    headers: new Headers({ 'content-type': 'application/json', ...headers }),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
+  };
+}
+
+describe('EdsClient error handling', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('retries a 429 with backoff, then succeeds', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, statusText: 'Too Many Requests', headers: new Headers({ 'retry-after': '0' }), text: () => Promise.resolve('slow down') })
+      .mockResolvedValueOnce(jsonResponse(200, { path: '/about', status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', retryBaseMs: 0 });
+    const res = await client.previewPage('/about');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(200);
+  });
+
+  it('gives up after maxRetries on persistent 429 with a friendly message', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', headers: new Headers(), text: () => Promise.resolve('') });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', retryBaseMs: 0, maxRetries: 2 });
+    await expect(client.previewPage('/about')).rejects.toThrow(/Rate limited/);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // initial + 2 retries
+  });
+
+  it('maps a 401 with EDS_API_KEY to a key-rejected message', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', headers: new Headers(), text: () => Promise.resolve('') }));
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'bad' });
+    await expect(client.previewPage('/about')).rejects.toThrow(/EDS_API_KEY was rejected/);
+  });
+
+  it('maps 403 and 404 to actionable messages', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden', headers: new Headers(), text: () => Promise.resolve('') }));
+    let client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    await expect(client.previewPage('/x')).rejects.toThrow(/Access denied/);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', headers: new Headers(), text: () => Promise.resolve('') }));
+    client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    await expect(client.getStatus('/x')).rejects.toThrow(/Not found/);
+  });
+
+  it('getRedirects returns [] on 404 but rethrows other failures', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', headers: new Headers(), text: () => Promise.resolve('') }));
+    let client = new EdsClient({ owner: 'o', repo: 'r' });
+    await expect(client.getRedirects()).resolves.toEqual([]);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: 'Server Error', headers: new Headers(), text: () => Promise.resolve('boom') }));
+    client = new EdsClient({ owner: 'o', repo: 'r' });
+    await expect(client.getRedirects()).rejects.toThrow(/500/);
+  });
+});
+
+describe('EdsClient 401 clears the cached login token', () => {
+  let home: string;
+  let prevHome: string | undefined;
+  beforeEach(() => {
+    prevHome = process.env.HOME;
+    home = mkdtempSync(join(tmpdir(), 'eds-401-'));
+    process.env.HOME = home;
+    vi.unstubAllGlobals();
+  });
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+    rmSync(home, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+  });
+
+  it('a cached-token 401 clears the token and asks the user to re-login', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const { saveToken, loadToken } = await import('../src/auth/token-store.js');
+    saveToken({ token: 'cached', expiresAt: Date.now() + 3_600_000, owner: 'o', repo: 'r', ref: 'main' });
+    expect(loadToken()).not.toBeNull();
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', headers: new Headers(), text: () => Promise.resolve('') }));
+    const client = new EdsClient({ owner: 'o', repo: 'r' }); // no apiKey → uses cache
+    await expect(client.previewPage('/about')).rejects.toThrow(/login/i);
+    expect(loadToken()).toBeNull(); // token was cleared
+  });
+});
+
+describe('searchPages result paging', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('pages through matches with offset/limit and reports total', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const data = [
+      { path: '/blog/a', title: 'Blog A', description: '', image: '', lastModified: 1 },
+      { path: '/blog/b', title: 'Blog B', description: '', image: '', lastModified: 1 },
+      { path: '/blog/c', title: 'Blog C', description: '', image: '', lastModified: 1 },
+      { path: '/about', title: 'About', description: '', image: '', lastModified: 1 },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { total: 4, offset: 0, limit: 5000, data })));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const res = await client.searchPages('blog', 2, 1);
+    expect(res.total).toBe(3);
+    expect(res.offset).toBe(1);
+    expect(res.data.map((d) => d.path)).toEqual(['/blog/b', '/blog/c']);
+  });
+
+  it('flags truncated when the index exceeds the scan cap', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const data = Array.from({ length: 5000 }, (_, i) => ({ path: `/p${i}`, title: `t${i}`, description: '', image: '', lastModified: 1 }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { total: 5000, offset: 0, limit: 5000, data })));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const res = await client.searchPages('nomatch', 20, 0);
+    expect(res.truncated).toBe(true);
+  });
+});
+
+describe('EdsClient read methods (parsing)', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  function textResponse(status: number, body: string, contentType = 'text/plain') {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: '',
+      headers: new Headers({ 'content-type': contentType }),
+      text: () => Promise.resolve(body),
+      json: () => Promise.resolve(JSON.parse(body)),
+    };
+  }
+
+  it('getSitemap parses <url>/<loc>/<lastmod> from XML', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const xml = '<urlset><url><loc>https://x/a</loc><lastmod>2026-01-01</lastmod></url><url><loc>https://x/b</loc></url></urlset>';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, xml, 'application/xml')));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const entries = await client.getSitemap();
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toEqual({ loc: 'https://x/a', lastmod: '2026-01-01' });
+    expect(entries[1]).toEqual({ loc: 'https://x/b' });
+  });
+
+  it('getCwv unwraps the { results: { data } } RUM envelope', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify({ results: { data: [{ url: '/a', lcp: 1, cls: 0, inp: 1, ttfb: 1, pageViews: 1 }] } }), 'application/json')));
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const data = await client.getCwv('example.com');
+    expect(data).toHaveLength(1);
+    expect(data[0].url).toBe('/a');
+  });
+
+  it('getPageContent requests the .plain.html rendition and returns the logical path', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue(textResponse(200, '<h1>About</h1>', 'text/html'));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    const page = await client.getPageContent('/about');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://main--r--o.aem.live/about.plain.html');
+    expect(page).toEqual({ path: '/about', html: '<h1>About</h1>' });
+  });
+
+  it('getPageContent maps the root path to index.plain.html', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn().mockResolvedValue(textResponse(200, '<h1>Home</h1>', 'text/html'));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    await client.getPageContent('/');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://main--r--o.aem.live/index.plain.html');
+  });
+
+  it('previewAndPublish issues preview then publish', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(textResponse(200, JSON.stringify({ path: '/a', status: 200, resourcePath: 'p' }), 'application/json'))
+      .mockResolvedValueOnce(textResponse(200, JSON.stringify({ path: '/a', status: 200, resourcePath: 'l' }), 'application/json'));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+    const res = await client.previewAndPublish('/a');
+    expect(fetchMock.mock.calls[0][0]).toContain('/preview/o/r/main/a');
+    expect(fetchMock.mock.calls[1][0]).toContain('/live/o/r/main/a');
+    expect(res.preview.status).toBe(200);
+    expect(res.publish.status).toBe(200);
+  });
+
+  it('getConfig / getLogs / getApiKeys parse their responses', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k' });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify({ cdn: { prod: {} } }), 'application/json')));
+    expect(await client.getConfig()).toHaveProperty('cdn');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify([{ timestamp: 't', action: 'publish', path: '/a', user: 'u' }]), 'application/json')));
+    expect(await client.getLogs()).toHaveLength(1);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textResponse(200, JSON.stringify({ data: [{ id: '1', name: 'k', role: 'publish', createdAt: 'd' }] }), 'application/json')));
+    expect(await client.getApiKeys()).toHaveLength(1);
   });
 });
 

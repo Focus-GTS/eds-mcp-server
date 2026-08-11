@@ -512,16 +512,28 @@ export async function handleGetRedirects(
 
 export async function handleSearchPages(
   client: EdsClient,
-  args: { query: string; limit?: number },
+  args: { query: string; limit?: number; offset?: number },
 ) {
   try {
-    const index = await client.searchPages(args.query, args.limit);
+    const index = await client.searchPages(args.query, args.limit, args.offset);
 
     if (index.data.length === 0) {
-      return textResult(`No pages matching "${args.query}".`);
+      const none = `No pages matching "${args.query}"${index.offset ? ` at offset ${index.offset}` : ''}.`;
+      return textResult(
+        index.truncated
+          ? `${none}\n(Note: the index is large and only the first rows were scanned — some matches may be missing.)`
+          : none,
+      );
     }
 
-    const lines = [`Search results for "${args.query}": ${index.total} matches (showing ${index.data.length})`, ''];
+    const shownTo = index.offset + index.data.length;
+    const lines = [
+      `Search results for "${args.query}": ${index.total} matches (showing ${index.offset + 1}–${shownTo})`,
+      ...(index.truncated
+        ? ['(Note: index scan was capped — some matches beyond the cap may be missing.)']
+        : []),
+      '',
+    ];
     for (const entry of index.data) {
       const modified = formatModified(entry.lastModified);
       lines.push(`  ${entry.path}  —  ${entry.title}  (${modified})`);

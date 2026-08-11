@@ -113,6 +113,11 @@ export interface EdsQueryIndexResponse {
   limit: number;
   /** Array of index entries */
   data: EdsQueryIndexEntry[];
+  /**
+   * Set by search when the index exceeded the scan cap, so some matches beyond
+   * the cap may be missing. Absent/false means the whole index was scanned.
+   */
+  truncated?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,4 +293,8 @@ export interface EdsClientOptions {
   apiKey?: string;
   /** Domain key used for RUM / analytics queries */
   domainKey?: string;
+  /** Max automatic retries on 429/503 responses (default 3). */
+  maxRetries?: number;
+  /** Base backoff in ms between retries (default 500). Set 0 in tests. */
+  retryBaseMs?: number;
 }
