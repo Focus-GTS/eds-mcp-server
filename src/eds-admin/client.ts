@@ -138,6 +138,30 @@ export class EdsClient {
       .join('/');
   }
 
+  /**
+   * Normalize a path for a bulk-job *body* (not a URL). The Admin API requires
+   * bulk paths to be absolute (leading `/`), so we ensure one and apply the
+   * same traversal guard as {@link normalizePath} — but we do NOT percent-encode,
+   * because these are JSON body values the server resolves itself, not URL path
+   * segments. Without this, `eds_bulk_publish(["about"])` would send a relative
+   * path the API rejects, even though `eds_publish_page("about")` works.
+   */
+  private normalizeBulkPath(path: string): string {
+    const cleaned = path.replace(/^\/+/, '');
+    for (const seg of cleaned.split('/')) {
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(seg);
+      } catch {
+        decoded = seg;
+      }
+      if (decoded === '..' || decoded === '.') {
+        throw new Error(`Invalid path: traversal segments are not allowed — ${path}`);
+      }
+    }
+    return `/${cleaned}`;
+  }
+
   /** Build the AEM Live content origin for this site. */
   private get contentOrigin(): string {
     return `https://${this.ref}--${this.repo}--${this.owner}.aem.live`;
@@ -187,12 +211,13 @@ export class EdsClient {
         return this.parseOk<T>(response);
       }
 
-      // Transient overload (429 Too Many Requests / 503) — back off and retry,
-      // honoring a Retry-After header when present, up to `maxRetries` times.
-      if (
-        (response.status === 429 || response.status === 503) &&
-        attempt < this.maxRetries
-      ) {
+      // Retry transient overloads, but never risk duplicating a write:
+      // - 429 (Too Many Requests) means the request was NOT processed → safe to
+      //   retry for any method.
+      // - 503 is ambiguous for a non-idempotent write (a bulk publish POST may
+      //   have been accepted before the gateway returned 503) → retry 503 only
+      //   for idempotent methods, so a POST can't enqueue duplicate jobs.
+      if (attempt < this.maxRetries && this.isRetryable(response, options)) {
         await sleep(this.retryDelayMs(response, attempt));
         continue;
       }
@@ -218,6 +243,24 @@ export class EdsClient {
 
     // Fall back to returning the raw text wrapped in the expected shape.
     return (await response.text()) as unknown as T;
+  }
+
+  /**
+   * Whether a failed response should be retried. 429 is always safe (the
+   * request was not processed); 503 only for idempotent methods, so a
+   * non-idempotent write (POST) can't be duplicated.
+   */
+  private isRetryable(response: Response, options?: RequestInit): boolean {
+    if (response.status === 429) return true;
+    if (response.status !== 503) return false;
+    const method = (options?.method ?? 'GET').toUpperCase();
+    return (
+      method === 'GET' ||
+      method === 'HEAD' ||
+      method === 'PUT' ||
+      method === 'DELETE' ||
+      method === 'OPTIONS'
+    );
   }
 
   /** Compute the backoff delay for a retryable response. */
@@ -686,7 +729,9 @@ export class EdsClient {
     options?: { forceUpdate?: boolean },
   ): Promise<EdsBulkJob> {
     const url = `${this.adminBase}/${verb}/${this.owner}/${this.repo}/${this.ref}/*`;
-    const body: Record<string, unknown> = { paths };
+    const body: Record<string, unknown> = {
+      paths: paths.map((p) => this.normalizeBulkPath(p)),
+    };
     if (options?.forceUpdate !== undefined) {
       body.forceUpdate = options.forceUpdate;
     }
@@ -703,10 +748,17 @@ export class EdsClient {
     });
 
     const job = res.job ?? {};
+    if (!job.name) {
+      // A 202 with no job handle can't be tracked — fail loudly rather than
+      // hand back an unpollable name that eds_get_job_status would reject.
+      throw new Error(
+        'The bulk request was accepted but the API returned no job handle, so its progress cannot be tracked.',
+      );
+    }
     return {
       // The publish endpoint is /live/* but its job topic is "publish".
       topic: job.topic ?? (verb === 'live' ? 'publish' : 'preview'),
-      name: job.name ?? '',
+      name: job.name,
       state: job.state ?? 'created',
       startTime: job.startTime,
       pathCount: paths.length,
@@ -816,8 +868,10 @@ export class EdsClient {
       offset,
       limit,
       data: filtered.slice(offset, offset + limit),
-      // The index itself was longer than we scanned — matches may be missing.
-      truncated: index.data.length >= EdsClient.SEARCH_SCAN_CAP,
+      // The index reports more rows than we scanned — matches may be missing.
+      // Using the API's own `total` is exact and avoids a false positive when a
+      // site happens to have exactly SEARCH_SCAN_CAP rows.
+      truncated: index.total > index.data.length,
     };
   }
 }

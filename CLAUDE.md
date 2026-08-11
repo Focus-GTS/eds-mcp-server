@@ -22,8 +22,8 @@ src/
     client.ts           -- HTTP client wrapping all EDS APIs
     types.ts            -- TypeScript interfaces
   utils/
-    url.ts              -- EDS URL construction helpers
-    errors.ts           -- Error formatting
+    errors.ts           -- Error formatting + typed EdsApiError
+  lib.ts                -- Import-safe public library surface (main/types entry)
 ```
 
 ## Environment Variables
