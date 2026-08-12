@@ -30,8 +30,9 @@ export async function handleDaListSources(
     }
     const lines = [`DA sources: ${entries.length}`, ''];
     for (const e of entries) {
-      const kind = e.ext ? `.${e.ext}` : '/';
-      lines.push(`  ${e.path ?? e.name ?? '(unnamed)'}${e.ext ? '' : kind}`);
+      // Paths are site-relative and already carry a file extension (files) or a
+      // trailing slash (folders), so they read cleanly as-is.
+      lines.push(`  ${e.path ?? e.name ?? '(unnamed)'}`);
     }
     return textResult(lines.join('\n'));
   } catch (error) {

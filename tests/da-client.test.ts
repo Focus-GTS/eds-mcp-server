@@ -42,26 +42,39 @@ describe('DaClient wire contract (admin.da.live)', () => {
     vi.stubGlobal('fetch', fetchMock);
     await new DaClient(opts).getSource('index');
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://admin.da.live/source/o/r/index');
+    expect(url).toBe('https://admin.da.live/source/o/r/index.html'); // .html assumed
     const headers = init.headers as Headers;
     expect(headers.get('authorization')).toBe('Bearer da-token');
     expect(headers.get('x-da-initiator')).toBe('mcp');
     expect(String(url)).not.toContain('da-token');
   });
 
-  it('getSource returns raw content + logical path', async () => {
+  it('getSource returns raw content + logical path (.html appended)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(textRes(200, '<h1>About</h1>')));
     const src = await new DaClient(opts).getSource('blog/post');
-    expect(src).toEqual({ path: '/blog/post', content: '<h1>About</h1>', contentType: 'text/html' });
+    expect(src).toEqual({ path: '/blog/post.html', content: '<h1>About</h1>', contentType: 'text/html' });
   });
 
-  it('listSources GETs /list and handles both array and {sources} shapes', async () => {
-    const entries = [{ path: '/a', name: 'a', ext: 'html' }];
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, entries)));
-    expect(await new DaClient(opts).listSources('blog')).toEqual(entries);
+  it('preserves an explicit extension instead of appending .html', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(textRes(200, '{}', 'application/json'));
+    vi.stubGlobal('fetch', fetchMock);
+    await new DaClient(opts).getSource('config/data.json');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.da.live/source/o/r/config/data.json');
+  });
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, { sources: entries, path: '/blog' })));
-    expect(await new DaClient(opts).listSources('blog')).toEqual(entries);
+  it('listSources GETs /list, strips the /{org}/{repo} prefix, and handles both shapes', async () => {
+    const raw = [
+      { path: '/o/r/blog/post.html', name: 'post.html', ext: 'html' },
+      { path: '/o/r/blog/drafts/', name: 'drafts' },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, raw)));
+    const out = await new DaClient(opts).listSources('blog');
+    // A listed path is now site-relative and feeds straight back into get_source.
+    expect(out.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts/']);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, { sources: raw, path: '/blog' })));
+    const wrapped = await new DaClient(opts).listSources('blog');
+    expect(wrapped.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts/']);
   });
 
   it('putSource POSTs multipart form-data to /source with the content', async () => {
@@ -69,39 +82,39 @@ describe('DaClient wire contract (admin.da.live)', () => {
     vi.stubGlobal('fetch', fetchMock);
     const res = await new DaClient(opts).putSource('blog/post', '<h1>x</h1>');
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://admin.da.live/source/o/r/blog/post');
+    expect(url).toBe('https://admin.da.live/source/o/r/blog/post.html'); // .html assumed
     expect(init.method).toBe('POST');
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.body as FormData).has('data')).toBe(true);
-    expect(res).toEqual({ status: 201, path: '/blog/post' });
+    expect(res).toEqual({ status: 201, path: '/blog/post.html' });
   });
 
   it('deleteSource DELETEs /source', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonRes(200, {}));
     vi.stubGlobal('fetch', fetchMock);
     await new DaClient(opts).deleteSource('old');
-    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.da.live/source/o/r/old');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.da.live/source/o/r/old.html');
     expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
   });
 
-  it('copySource POSTs /copy with an absolute destination', async () => {
+  it('copySource POSTs /copy with an absolute .html destination', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonRes(200, {}));
     vi.stubGlobal('fetch', fetchMock);
     await new DaClient(opts).copySource('a', 'b');
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://admin.da.live/copy/o/r/a');
-    expect((init.body as FormData).get('destination')).toBe('/o/r/b');
+    expect(url).toBe('https://admin.da.live/copy/o/r/a.html');
+    expect((init.body as FormData).get('destination')).toBe('/o/r/b.html');
   });
 
   it('moveSource POSTs /move', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonRes(200, {}));
     vi.stubGlobal('fetch', fetchMock);
     await new DaClient(opts).moveSource('a', 'b');
-    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.da.live/move/o/r/a');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admin.da.live/move/o/r/a.html');
   });
 
-  it('getVersions GETs /versionlist', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, { versions: [{ path: 'v1' }] })));
+  it('getVersions GETs /versionlist and parses the real bare-array shape', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, [{ path: 'v1', author: 'me' }])));
     const versions = await new DaClient(opts).getVersions('index');
     expect(versions).toHaveLength(1);
   });

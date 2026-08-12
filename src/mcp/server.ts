@@ -380,7 +380,7 @@ export function createServer(options: EdsClientOptions): McpServer {
     'eds_da_get_source',
     'Get the raw authored source (typically HTML) of a Document Authoring document — the source of truth, not the rendered/previewed output. Requires EDS_DA_TOKEN.',
     {
-      path: daSourcePath.describe('DA document path (e.g., "index" or "blog/my-post")'),
+      path: daSourcePath.describe('DA document path; ".html" is assumed when no extension is given (e.g., "index" → index.html, or "data.json")'),
     },
     async (args) => daHandlers.handleDaGetSource(daClient, args),
   );
@@ -389,7 +389,7 @@ export function createServer(options: EdsClientOptions): McpServer {
     'eds_da_put_source',
     'Create or update (upsert) the authored source of a Document Authoring document. Requires EDS_DA_TOKEN.',
     {
-      path: daSourcePath.describe('DA document path to write (e.g., "blog/my-post")'),
+      path: daSourcePath.describe('DA document path to write; ".html" is assumed when no extension is given (e.g., "blog/my-post" → blog/my-post.html)'),
       content: z.string().describe('The full source content to store (typically HTML)'),
       contentType: z
         .string()

@@ -61,16 +61,29 @@ export class DaClient {
     });
     const body = (await res.json().catch(() => null)) as unknown;
     // The API may return a bare array or a { sources: [...] } wrapper.
-    if (Array.isArray(body)) return body as DaSourceEntry[];
-    if (body && typeof body === 'object' && Array.isArray((body as { sources?: unknown }).sources)) {
-      return (body as { sources: DaSourceEntry[] }).sources;
+    let entries: DaSourceEntry[] = [];
+    if (Array.isArray(body)) {
+      entries = body as DaSourceEntry[];
+    } else if (body && typeof body === 'object' && Array.isArray((body as { sources?: unknown }).sources)) {
+      entries = (body as { sources: DaSourceEntry[] }).sources;
     }
-    return [];
+    // DA list paths include the /{org}/{repo} prefix; strip it so a listed path
+    // is site-relative and can be passed straight back to get_source/put_source.
+    return entries.map((e) => ({ ...e, path: this.stripSitePrefix(e.path) }));
+  }
+
+  /** Remove the leading /{org}/{repo} from a DA-returned path. */
+  private stripSitePrefix(path?: string): string | undefined {
+    if (!path) return path;
+    const prefix = `/${this.org}/${this.repo}`;
+    if (path === prefix) return '/';
+    if (path.startsWith(`${prefix}/`)) return path.slice(prefix.length);
+    return path;
   }
 
   /** Get a document's raw source — GET /source/{org}/{repo}/{path}. */
   async getSource(path: string): Promise<DaSourceContent> {
-    const norm = this.normalizePath(path);
+    const norm = this.normalizeDocPath(path);
     const res = await this.request(`/source/${this.org}/${this.repo}/${norm}`, {
       method: 'GET',
     });
@@ -91,7 +104,7 @@ export class DaClient {
     content: string,
     contentType = 'text/html',
   ): Promise<DaOperationResponse> {
-    const norm = this.normalizePath(path);
+    const norm = this.normalizeDocPath(path);
     const form = new FormData();
     form.append('data', new Blob([content], { type: contentType }));
     const res = await this.request(`/source/${this.org}/${this.repo}/${norm}`, {
@@ -103,7 +116,7 @@ export class DaClient {
 
   /** Delete a document — DELETE /source/{org}/{repo}/{path}. */
   async deleteSource(path: string): Promise<DaOperationResponse> {
-    const norm = this.normalizePath(path);
+    const norm = this.normalizeDocPath(path);
     const res = await this.request(`/source/${this.org}/${this.repo}/${norm}`, {
       method: 'DELETE',
     });
@@ -125,8 +138,8 @@ export class DaClient {
     from: string,
     to: string,
   ): Promise<DaOperationResponse> {
-    const src = this.normalizePath(from);
-    const dst = this.normalizePath(to);
+    const src = this.normalizeDocPath(from);
+    const dst = this.normalizeDocPath(to);
     const form = new FormData();
     form.append('destination', `/${this.org}/${this.repo}/${dst}`);
     const res = await this.request(`/${verb}/${this.org}/${this.repo}/${src}`, {
@@ -138,7 +151,7 @@ export class DaClient {
 
   /** Get a document's version history — GET /versionlist/{org}/{repo}/{path}. */
   async getVersions(path: string): Promise<DaVersion[]> {
-    const norm = this.normalizePath(path);
+    const norm = this.normalizeDocPath(path);
     const res = await this.request(
       `/versionlist/${this.org}/${this.repo}/${norm}`,
       { method: 'GET' },
@@ -155,11 +168,14 @@ export class DaClient {
   // Helpers
   // -------------------------------------------------------------------------
 
-  /** Strip leading slashes, reject traversal, and percent-encode each segment. */
+  /**
+   * Normalize a folder/collection path: drop empty segments (leading, trailing,
+   * and internal `//`), reject traversal, and percent-encode each segment.
+   */
   private normalizePath(path: string): string {
-    const cleaned = path.replace(/^\/+/, '');
-    return cleaned
+    return path
       .split('/')
+      .filter((seg) => seg.length > 0)
       .map((seg) => {
         let decoded: string;
         try {
@@ -176,6 +192,27 @@ export class DaClient {
         return encodeURIComponent(decoded);
       })
       .join('/');
+  }
+
+  /**
+   * Normalize a DA *document* path. DA distinguishes files from folders by the
+   * presence of an extension, so a document path with no extension gets `.html`
+   * appended — mirroring adobe-rnd/da-mcp's `normalizePagePath`. Without this,
+   * `get_source("index")` would 404 and `put_source("blog/post")` would create a
+   * folder-shaped object instead of a page.
+   */
+  private normalizeDocPath(path: string): string {
+    const norm = this.normalizePath(path);
+    if (norm === '') return norm;
+    const lastEncoded = norm.split('/').pop() ?? '';
+    let lastDecoded: string;
+    try {
+      lastDecoded = decodeURIComponent(lastEncoded);
+    } catch {
+      lastDecoded = lastEncoded;
+    }
+    const hasExtension = lastDecoded.lastIndexOf('.') > 0;
+    return hasExtension ? norm : `${norm}.html`;
   }
 
   /**

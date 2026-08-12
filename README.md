@@ -114,6 +114,8 @@ sequenceDiagram
 **Document Authoring (DA)** — direct access to the authored source, not the rendered output (requires `EDS_DA_TOKEN`):
 `eds_da_list_sources` · `eds_da_get_source` · `eds_da_put_source` · `eds_da_delete_source` · `eds_da_copy_source` · `eds_da_move_source` · `eds_da_get_versions`
 
+> `EDS_DA_TOKEN` is an Adobe IMS access token for Document Authoring — grab it from an authenticated [da.live](https://da.live) session (the IMS `access_token`). Document paths assume `.html` when no extension is given (`index` → `index.html`).
+
 ---
 
 ## 🔌 Add it to your tool
