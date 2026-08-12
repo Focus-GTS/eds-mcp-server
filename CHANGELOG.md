@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Document Authoring (DA) content access** (ADR-007). Seven new `eds_da_*`
+  tools give direct access to a site's authored source via `admin.da.live` —
+  the source of truth, not the rendered/previewed output: `list_sources`,
+  `get_source`, `put_source`, `delete_source`, `copy_source`, `move_source`,
+  `get_versions`. Endpoints and request shapes are adopted from Adobe's
+  `adobe-rnd/da-mcp` (credited). Auth is a bearer token via `EDS_DA_TOKEN`
+  (org/site default to `EDS_OWNER`/`EDS_REPO`, overridable with
+  `EDS_DA_ORG`/`EDS_DA_REPO`). Without a token the DA tools return a friendly
+  "set EDS_DA_TOKEN" message. Same retry/backoff and traversal-guard discipline
+  as the EDS client.
+
+### Changed
+- **Bounded retry time.** Retries now share a total sleep budget (default 20s),
+  so a hostile or large `Retry-After` can no longer make a single tool call hang
+  for the full per-retry cap × attempts. Applies to both the EDS and DA clients.
+- **Search no longer refetches the index on every call.** `eds_search_pages`
+  caches the query index briefly (60s), so paging through results and
+  back-to-back searches reuse it instead of pulling thousands of rows each time.
+
 ## [0.4.0] - 2026-08-11
 
 ### Added

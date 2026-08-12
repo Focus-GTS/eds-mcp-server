@@ -10,7 +10,7 @@
 
 ### Let an AI agent run your Adobe Edge Delivery site.
 
-**21 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**28 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 ![Ask your agent](https://readme-typing-svg.demolab.com/?font=JetBrains+Mono&size=20&duration=2600&pause=800&color=6E56CF&center=true&vCenter=true&width=640&height=42&lines=%22Preview+and+publish+the+homepage%22;%22What+are+the+Core+Web+Vitals%3F%22;%22Find+pages+missing+a+description%22;%22Publish+all+the+blog+posts%22)
@@ -39,7 +39,7 @@ That's it — no local AEM, no scripts, no glue code.
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>21 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>28 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -72,7 +72,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 21 tools
+## 🛠️ The 28 tools
 
 <table>
 <tr><td valign="top" width="33%">
@@ -110,6 +110,11 @@ sequenceDiagram
 
 </td></tr>
 </table>
+
+**Document Authoring (DA)** — direct access to the authored source, not the rendered output (requires `EDS_DA_TOKEN`):
+`eds_da_list_sources` · `eds_da_get_source` · `eds_da_put_source` · `eds_da_delete_source` · `eds_da_copy_source` · `eds_da_move_source` · `eds_da_get_versions`
+
+> `EDS_DA_TOKEN` is an Adobe IMS access token for Document Authoring — grab it from an authenticated [da.live](https://da.live) session (the IMS `access_token`). Document paths assume `.html` when no extension is given (`index` → `index.html`).
 
 ---
 
@@ -166,8 +171,11 @@ claude mcp add eds -e EDS_OWNER=your-org -e EDS_REPO=your-site -- npx @focusgts/
 | `EDS_REF` | No | Git branch (default: `main`) |
 | `EDS_API_KEY` | No | Admin token (see Authentication). Browser login is the alternative. |
 | `EDS_DOMAIN_KEY` | No | OpTel domain key for analytics queries (CWV, 404s, experiments) |
+| `EDS_DA_TOKEN` | No | Document Authoring API token — enables the `eds_da_*` source tools |
+| `EDS_DA_ORG` | No | DA org (defaults to `EDS_OWNER`) |
+| `EDS_DA_REPO` | No | DA repo/site (defaults to `EDS_REPO`) |
 
-**Read-only tools** (content, sitemap, metadata) need no keys. **Write tools** (preview, publish, cache) need an admin token. **Analytics tools** need `EDS_DOMAIN_KEY`.
+**Read-only tools** (content, sitemap, metadata) need no keys. **Write tools** (preview, publish, cache) need an admin token. **Analytics tools** need `EDS_DOMAIN_KEY`. **DA source tools** need `EDS_DA_TOKEN`.
 
 ---
 

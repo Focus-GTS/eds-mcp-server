@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 21 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 28 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 21 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 28 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -35,6 +35,9 @@ src/
 | `EDS_REF` | No | Git ref (default: `main`) |
 | `EDS_API_KEY` | No | Admin API token override (see Authentication). Browser login is the alternative for interactive use. |
 | `EDS_DOMAIN_KEY` | No | OpTel domain key (required for CWV/404/experiment queries) |
+| `EDS_DA_TOKEN` | No | Document Authoring API token (required for `eds_da_*` tools) |
+| `EDS_DA_ORG` | No | DA org (defaults to `EDS_OWNER`) |
+| `EDS_DA_REPO` | No | DA repo/site (defaults to `EDS_REPO`) |
 
 ## Authentication
 
@@ -109,6 +112,15 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_preview_and_publish` | Preview + publish in one operation |
 | `eds_get_redirects` | Fetch redirect rules |
 | `eds_search_pages` | Search pages by keyword |
+| `eds_da_list_sources` | List Document Authoring (DA) sources/folders |
+| `eds_da_get_source` | Get a DA document's raw authored source |
+| `eds_da_put_source` | Create/update a DA document's source |
+| `eds_da_delete_source` | Delete a DA document |
+| `eds_da_copy_source` | Copy a DA document |
+| `eds_da_move_source` | Move/rename a DA document |
+| `eds_da_get_versions` | Get a DA document's version history |
+
+DA tools (`eds_da_*`) access the authored source directly via `admin.da.live` (adopted from `adobe-rnd/da-mcp`, per ADR-007). They require `EDS_DA_TOKEN`; DA client code lives in `src/da-admin/`.
 
 ## Conventions
 

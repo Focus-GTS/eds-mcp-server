@@ -14,6 +14,7 @@ import type {
   EdsCacheResponse,
   EdsPageContent,
   EdsQueryIndexResponse,
+  EdsQueryIndexEntry,
   EdsSitemapEntry,
   EdsCwvData,
   Eds404Entry,
@@ -83,6 +84,11 @@ export class EdsClient {
   private readonly domainKey?: string;
   private readonly maxRetries: number;
   private readonly retryBaseMs: number;
+  private readonly maxRetryMs: number;
+
+  /** Short-lived cache of the query index used by search. */
+  private indexCache: { data: EdsQueryIndexEntry[]; total: number; at: number } | null =
+    null;
 
   private readonly adminBase = 'https://admin.hlx.page';
   private readonly rumQueryBase =
@@ -96,6 +102,7 @@ export class EdsClient {
     this.domainKey = options.domainKey;
     this.maxRetries = options.maxRetries ?? 3;
     this.retryBaseMs = options.retryBaseMs ?? 500;
+    this.maxRetryMs = options.maxRetryMs ?? 20_000;
   }
 
   // -------------------------------------------------------------------------
@@ -201,6 +208,7 @@ export class EdsClient {
     url: string,
     options?: RequestInit,
   ): Promise<T> {
+    let sleptMs = 0;
     for (let attempt = 0; ; attempt++) {
       const response = await fetch(url, {
         ...options,
@@ -218,8 +226,14 @@ export class EdsClient {
       //   have been accepted before the gateway returned 503) → retry 503 only
       //   for idempotent methods, so a POST can't enqueue duplicate jobs.
       if (attempt < this.maxRetries && this.isRetryable(response, options)) {
-        await sleep(this.retryDelayMs(response, attempt));
-        continue;
+        const delay = this.retryDelayMs(response, attempt);
+        // Bound total sleep so a hostile Retry-After can't hang the call: if the
+        // next wait would blow the budget, stop retrying and fail fast.
+        if (sleptMs + delay <= this.maxRetryMs) {
+          sleptMs += delay;
+          await sleep(delay);
+          continue;
+        }
       }
 
       await this.throwForStatus(response, url, options);
@@ -842,6 +856,9 @@ export class EdsClient {
    */
   private static readonly SEARCH_SCAN_CAP = 5000;
 
+  /** How long a fetched search index is reused before refetching. */
+  private static readonly SEARCH_CACHE_TTL_MS = 60_000;
+
   /**
    * Search pages in the query index by keyword.
    *
@@ -854,7 +871,7 @@ export class EdsClient {
     limit: number = 20,
     offset: number = 0,
   ): Promise<EdsQueryIndexResponse> {
-    const index = await this.listPages(EdsClient.SEARCH_SCAN_CAP, 0);
+    const index = await this.scanIndex();
     const q = query.toLowerCase();
 
     const filtered = index.data.filter((entry) =>
@@ -873,5 +890,24 @@ export class EdsClient {
       // site happens to have exactly SEARCH_SCAN_CAP rows.
       truncated: index.total > index.data.length,
     };
+  }
+
+  /**
+   * Fetch the query index for search, cached briefly. Search filters the whole
+   * index client-side, so without this every search — and every page of a
+   * single search — refetched thousands of rows. A short TTL keeps paging and
+   * back-to-back searches cheap while bounding staleness.
+   */
+  private async scanIndex(): Promise<{ data: EdsQueryIndexEntry[]; total: number }> {
+    const now = Date.now();
+    if (
+      this.indexCache &&
+      now - this.indexCache.at < EdsClient.SEARCH_CACHE_TTL_MS
+    ) {
+      return this.indexCache;
+    }
+    const index = await this.listPages(EdsClient.SEARCH_SCAN_CAP, 0);
+    this.indexCache = { data: index.data, total: index.total, at: now };
+    return this.indexCache;
   }
 }

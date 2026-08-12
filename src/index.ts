@@ -105,6 +105,9 @@ const repo = process.env.EDS_REPO;
 const ref = process.env.EDS_REF || 'main';
 const apiKey = process.env.EDS_API_KEY;
 const domainKey = process.env.EDS_DOMAIN_KEY;
+const daToken = process.env.EDS_DA_TOKEN;
+const daOrg = process.env.EDS_DA_ORG;
+const daRepo = process.env.EDS_DA_REPO;
 
 if (!owner || !repo) {
   process.stderr.write(
@@ -125,7 +128,16 @@ if (!owner || !repo) {
   process.exit(1);
 }
 
-const server = createServer({ owner, repo, ref, apiKey, domainKey });
+const server = createServer({
+  owner,
+  repo,
+  ref,
+  apiKey,
+  domainKey,
+  daToken,
+  daOrg,
+  daRepo,
+});
 const transport = new StdioServerTransport();
 
 async function shutdown() {

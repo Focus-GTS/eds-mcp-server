@@ -486,6 +486,17 @@ describe('EdsClient error handling', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3); // initial + 2 retries
   });
 
+  it('gives up fast when Retry-After would exceed the total retry budget (no hang)', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    // Retry-After: 30s, but the budget is 5ms — the first wait blows the budget,
+    // so it must fail immediately instead of sleeping 30s.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many', headers: new Headers({ 'retry-after': '30' }), text: () => Promise.resolve('') });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r', apiKey: 'k', maxRetryMs: 5 });
+    await expect(client.getStatus('/x')).rejects.toThrow(/Rate limited/);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry — a 30s wait exceeds the 5ms budget
+  });
+
   it('maps a 401 with EDS_API_KEY to a key-rejected message', async () => {
     const { EdsClient } = await import('../src/eds-admin/client.js');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', headers: new Headers(), text: () => Promise.resolve('') }));
@@ -572,6 +583,21 @@ describe('searchPages result paging', () => {
     const client = new EdsClient({ owner: 'o', repo: 'r' });
     const res = await client.searchPages('nomatch', 20, 0);
     expect(res.truncated).toBe(true);
+  });
+
+  it('caches the query index so paging a search does not refetch it', async () => {
+    const { EdsClient } = await import('../src/eds-admin/client.js');
+    const data = [
+      { path: '/blog/a', title: 'Blog A', description: '', image: '', lastModified: 1 },
+      { path: '/blog/b', title: 'Blog B', description: '', image: '', lastModified: 1 },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { total: 2, offset: 0, limit: 5000, data }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new EdsClient({ owner: 'o', repo: 'r' });
+    await client.searchPages('blog', 1, 0); // page 1
+    await client.searchPages('blog', 1, 1); // page 2 — should reuse the cached index
+    await client.searchPages('a', 20, 0); // a different query — still cached
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('does not flag truncated when the whole index was returned', async () => {
