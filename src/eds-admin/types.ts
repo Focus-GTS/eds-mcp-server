@@ -297,4 +297,10 @@ export interface EdsClientOptions {
   maxRetries?: number;
   /** Base backoff in ms between retries (default 500). Set 0 in tests. */
   retryBaseMs?: number;
+  /** Document Authoring (DA) API token (EDS_DA_TOKEN). Enables the DA tools. */
+  daToken?: string;
+  /** DA org. Defaults to `owner` when omitted. */
+  daOrg?: string;
+  /** DA repo/site. Defaults to `repo` when omitted. */
+  daRepo?: string;
 }

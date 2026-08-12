@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Document Authoring (DA) content access** (ADR-007). Seven new `eds_da_*`
+  tools give direct access to a site's authored source via `admin.da.live` —
+  the source of truth, not the rendered/previewed output: `list_sources`,
+  `get_source`, `put_source`, `delete_source`, `copy_source`, `move_source`,
+  `get_versions`. Endpoints and request shapes are adopted from Adobe's
+  `adobe-rnd/da-mcp` (credited). Auth is a bearer token via `EDS_DA_TOKEN`
+  (org/site default to `EDS_OWNER`/`EDS_REPO`, overridable with
+  `EDS_DA_ORG`/`EDS_DA_REPO`). Without a token the DA tools return a friendly
+  "set EDS_DA_TOKEN" message. Same retry/backoff and traversal-guard discipline
+  as the EDS client.
+
 ## [0.4.0] - 2026-08-11
 
 ### Added

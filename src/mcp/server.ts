@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 21 EDS tools registered.
+ * Creates a {@link McpServer} instance with all 28 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -13,8 +13,10 @@ import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { EdsClient } from '../eds-admin/client.js';
+import { DaClient } from '../da-admin/client.js';
 import type { EdsClientOptions } from '../eds-admin/types.js';
 import * as handlers from './handlers.js';
+import * as daHandlers from './da-handlers.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json') as { version: string };
@@ -61,6 +63,11 @@ export function createServer(options: EdsClientOptions): McpServer {
   });
 
   const client = new EdsClient(options);
+  const daClient = new DaClient({
+    token: options.daToken,
+    org: options.daOrg ?? options.owner,
+    repo: options.daRepo ?? options.repo,
+  });
 
   // ---------------------------------------------------------------------------
   // Publishing tools
@@ -333,6 +340,101 @@ export function createServer(options: EdsClientOptions): McpServer {
         .describe('Number of matches to skip, for paging through results (default 0)'),
     },
     async (args) => handlers.handleSearchPages(client, args),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Document Authoring (DA) content tools — direct access to the authored
+  // source (admin.da.live). Require EDS_DA_TOKEN; adopted from adobe-rnd/da-mcp.
+  // ---------------------------------------------------------------------------
+
+  const daSourcePath = z
+    .string()
+    .min(1, 'Path must not be empty')
+    .refine(
+      (v) =>
+        !v.split('/').some((s) => {
+          let decoded: string;
+          try {
+            decoded = decodeURIComponent(s);
+          } catch {
+            decoded = s;
+          }
+          return decoded === '..' || decoded === '.';
+        }),
+      { message: 'Path must not contain traversal segments (.. or .)' },
+    );
+
+  server.tool(
+    'eds_da_list_sources',
+    'List authored source documents and folders in Document Authoring (DA) under a path. Requires EDS_DA_TOKEN.',
+    {
+      path: z
+        .string()
+        .optional()
+        .describe('DA folder path to list (e.g., "blog"); omit for the site root'),
+    },
+    async (args) => daHandlers.handleDaListSources(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_get_source',
+    'Get the raw authored source (typically HTML) of a Document Authoring document — the source of truth, not the rendered/previewed output. Requires EDS_DA_TOKEN.',
+    {
+      path: daSourcePath.describe('DA document path (e.g., "index" or "blog/my-post")'),
+    },
+    async (args) => daHandlers.handleDaGetSource(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_put_source',
+    'Create or update (upsert) the authored source of a Document Authoring document. Requires EDS_DA_TOKEN.',
+    {
+      path: daSourcePath.describe('DA document path to write (e.g., "blog/my-post")'),
+      content: z.string().describe('The full source content to store (typically HTML)'),
+      contentType: z
+        .string()
+        .optional()
+        .describe('MIME type of the content (default: text/html)'),
+    },
+    async (args) => daHandlers.handleDaPutSource(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_delete_source',
+    'Delete an authored source document from Document Authoring. Requires EDS_DA_TOKEN.',
+    {
+      path: daSourcePath.describe('DA document path to delete'),
+    },
+    async (args) => daHandlers.handleDaDeleteSource(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_copy_source',
+    'Copy an authored source document to another path in Document Authoring. Requires EDS_DA_TOKEN.',
+    {
+      from: daSourcePath.describe('Source DA document path'),
+      to: daSourcePath.describe('Destination DA document path'),
+    },
+    async (args) => daHandlers.handleDaCopySource(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_move_source',
+    'Move (rename) an authored source document to another path in Document Authoring. Requires EDS_DA_TOKEN.',
+    {
+      from: daSourcePath.describe('Source DA document path'),
+      to: daSourcePath.describe('Destination DA document path'),
+    },
+    async (args) => daHandlers.handleDaMoveSource(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_get_versions',
+    'Get the version history of a Document Authoring source document. Requires EDS_DA_TOKEN.',
+    {
+      path: daSourcePath.describe('DA document path'),
+    },
+    async (args) => daHandlers.handleDaGetVersions(daClient, args),
   );
 
   return server;

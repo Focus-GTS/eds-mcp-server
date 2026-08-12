@@ -13,6 +13,7 @@
 
 export { createServer } from './mcp/server.js';
 export { EdsClient } from './eds-admin/client.js';
+export { DaClient, NEEDS_DA_TOKEN_MESSAGE } from './da-admin/client.js';
 
 export {
   login,
@@ -30,3 +31,4 @@ export type { LoginOptions, LoginResult, StoredToken } from './auth/index.js';
 export { formatError, EdsApiError } from './utils/errors.js';
 
 export type * from './eds-admin/types.js';
+export type * from './da-admin/types.js';
