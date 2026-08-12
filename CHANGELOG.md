@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-12
+
 ### Added
 - **Document Authoring (DA) content access** (ADR-007). Seven new `eds_da_*`
   tools give direct access to a site's authored source via `admin.da.live` —
