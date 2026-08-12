@@ -19,6 +19,8 @@ export interface DaClientOptions {
   maxRetries?: number;
   /** Base backoff in ms between retries (default 500). Set 0 in tests. */
   retryBaseMs?: number;
+  /** Total time budget for retry sleeps in ms (default 20000). Bounds hangs. */
+  maxRetryMs?: number;
 }
 
 /** One entry in a DA directory listing. */

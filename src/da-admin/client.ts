@@ -32,6 +32,7 @@ export class DaClient {
   private readonly repo: string;
   private readonly maxRetries: number;
   private readonly retryBaseMs: number;
+  private readonly maxRetryMs: number;
 
   private readonly adminBase = 'https://admin.da.live';
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
@@ -42,6 +43,7 @@ export class DaClient {
     this.repo = options.repo;
     this.maxRetries = options.maxRetries ?? 3;
     this.retryBaseMs = options.retryBaseMs ?? 500;
+    this.maxRetryMs = options.maxRetryMs ?? 20_000;
   }
 
   /** Whether a DA token is configured. */
@@ -233,6 +235,7 @@ export class DaClient {
     // Tag writes so DA attributes the version author as an agent.
     headers.set('x-da-initiator', 'mcp');
 
+    let sleptMs = 0;
     for (let attempt = 0; ; attempt++) {
       const response = await fetch(url, {
         ...options,
@@ -243,8 +246,13 @@ export class DaClient {
       if (response.ok) return response;
 
       if (attempt < this.maxRetries && this.isRetryable(response, options)) {
-        await sleep(this.retryDelayMs(response, attempt));
-        continue;
+        const delay = this.retryDelayMs(response, attempt);
+        // Bound total sleep so a hostile Retry-After can't hang the call.
+        if (sleptMs + delay <= this.maxRetryMs) {
+          sleptMs += delay;
+          await sleep(delay);
+          continue;
+        }
       }
 
       await this.throwForStatus(response, url);
