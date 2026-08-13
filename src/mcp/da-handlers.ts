@@ -100,6 +100,54 @@ export async function handleDaMoveSource(
   }
 }
 
+export async function handleDaExport(
+  client: DaClient,
+  args: { path: string; maxFiles?: number },
+) {
+  try {
+    const result = await client.exportTree(args.path, { maxFiles: args.maxFiles });
+    if (result.documents.length === 0 && result.failed.length === 0) {
+      return textResult(`No documents found under /${args.path.replace(/^\/+/, '')}.`);
+    }
+    const header = [
+      `Exported ${result.documents.length} document${result.documents.length === 1 ? '' : 's'} from /${args.path.replace(/^\/+/, '')}.`,
+    ];
+    if (result.truncated) {
+      header.push(`(Truncated at the maxFiles cap — narrow the path or raise maxFiles to get the rest.)`);
+    }
+    if (result.failed.length > 0) {
+      header.push(`(${result.failed.length} file(s) could not be fetched: ${result.failed.map((f) => f.path).join(', ')})`);
+    }
+    const body = result.documents.map((d) => `=== ${d.path} ===\n${d.content}`);
+    return textResult([...header, '', ...body].join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handleDaPush(
+  client: DaClient,
+  args: { documents: Array<{ path: string; content: string; contentType?: string }> },
+) {
+  try {
+    const result = await client.pushDocuments(args.documents);
+    const lines = [
+      `Pushed ${result.succeeded.length} document${result.succeeded.length === 1 ? '' : 's'}; ${result.failed.length} failed.`,
+    ];
+    if (result.succeeded.length > 0) {
+      lines.push('', 'Succeeded:');
+      for (const p of result.succeeded) lines.push(`  ✓ ${p}`);
+    }
+    if (result.failed.length > 0) {
+      lines.push('', 'Failed:');
+      for (const f of result.failed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+    }
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
 export async function handleDaGetVersions(
   client: DaClient,
   args: { path: string },

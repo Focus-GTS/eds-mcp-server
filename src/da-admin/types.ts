@@ -64,3 +64,33 @@ export interface DaOperationResponse {
   /** Affected path, when the API echoes it. */
   path?: string;
 }
+
+/** A single authored document (path + its source content). */
+export interface DaDocument {
+  /** Site-relative document path (e.g. /blog/post.html). */
+  path: string;
+  /** Raw source content. */
+  content: string;
+  /** MIME type, when known. */
+  contentType?: string;
+}
+
+/** Result of a bulk export of a DA subtree. */
+export interface DaExportResult {
+  /** Every document fetched successfully under the exported path. */
+  documents: DaDocument[];
+  /** Number of files discovered under the path. */
+  fileCount: number;
+  /** True when the subtree exceeded the `maxFiles` cap — some files omitted. */
+  truncated: boolean;
+  /** Files discovered but not fetchable (e.g. deleted mid-export), not dropped silently. */
+  failed: Array<{ path: string; error: string }>;
+}
+
+/** Result of a bulk push of many documents. */
+export interface DaPushResult {
+  /** Paths written successfully. */
+  succeeded: string[];
+  /** Paths that failed, with the error message. */
+  failed: Array<{ path: string; error: string }>;
+}

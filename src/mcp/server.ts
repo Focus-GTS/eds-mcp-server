@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 28 tools registered.
+ * Creates a {@link McpServer} instance with all 30 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -435,6 +435,40 @@ export function createServer(options: EdsClientOptions): McpServer {
       path: daSourcePath.describe('DA document path'),
     },
     async (args) => daHandlers.handleDaGetVersions(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_export',
+    'Bulk-export a whole Document Authoring subtree in one call: recursively fetch every document under a path and return all their sources together. The efficient "clone" read for operating on many pages at once (vs. one get per page). Requires EDS_DA_TOKEN.',
+    {
+      path: z
+        .string()
+        .describe('DA folder path to export (e.g., "blog"); use "" for the whole site'),
+      maxFiles: positiveInt
+        .max(1000)
+        .optional()
+        .describe('Maximum documents to fetch (default 100); result flags truncation if exceeded'),
+    },
+    async (args) => daHandlers.handleDaExport(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_push',
+    'Bulk-push many edited Document Authoring documents back in one call. The "push" half of the bulk workflow — write a whole batch of {path, content} at once. Returns per-document succeeded/failed. Requires EDS_DA_TOKEN.',
+    {
+      documents: z
+        .array(
+          z.object({
+            path: daSourcePath.describe('DA document path to write'),
+            content: z.string().describe('The full source content (typically HTML)'),
+            contentType: z.string().optional().describe('MIME type (default: text/html)'),
+          }),
+        )
+        .min(1)
+        .max(1000)
+        .describe('The documents to write back'),
+    },
+    async (args) => daHandlers.handleDaPush(daClient, args),
   );
 
   return server;

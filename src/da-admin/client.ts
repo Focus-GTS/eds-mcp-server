@@ -14,6 +14,9 @@ import type {
   DaSourceContent,
   DaVersion,
   DaOperationResponse,
+  DaDocument,
+  DaExportResult,
+  DaPushResult,
 } from './types.js';
 import { EdsApiError } from '../utils/errors.js';
 
@@ -164,6 +167,107 @@ export class DaClient {
       return (body as { versions: DaVersion[] }).versions;
     }
     return [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Bulk content operations (the agent-native "clone" model, ADR-008)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Export a whole DA subtree in one call: recursively list every document
+   * under `path` and fetch its source concurrently. This is the agent-native
+   * "clone" read — one call instead of the agent orchestrating N list+get
+   * calls. Bounded by `maxFiles` (flags `truncated`) and resilient to
+   * individual fetch failures (reported in `failed`, never dropped silently).
+   */
+  async exportTree(
+    path: string,
+    options: { maxFiles?: number; concurrency?: number } = {},
+  ): Promise<DaExportResult> {
+    const maxFiles = options.maxFiles ?? 100;
+    const concurrency = options.concurrency ?? 6;
+
+    // Breadth-first discovery of file paths (folders end with '/').
+    const files: string[] = [];
+    const queue: string[] = [path];
+    let truncated = false;
+    while (queue.length > 0 && files.length < maxFiles) {
+      const dir = queue.shift() as string;
+      const entries = await this.listSources(dir);
+      for (const entry of entries) {
+        if (!entry.path) continue;
+        if (entry.path.endsWith('/')) {
+          queue.push(entry.path);
+        } else if (files.length < maxFiles) {
+          files.push(entry.path);
+        } else {
+          truncated = true;
+        }
+      }
+    }
+    if (queue.length > 0) truncated = true;
+
+    const documents: DaDocument[] = [];
+    const failed: Array<{ path: string; error: string }> = [];
+    await this.mapWithConcurrency(
+      files,
+      async (filePath) => {
+        try {
+          const src = await this.getSource(filePath);
+          documents.push({ path: src.path, content: src.content, contentType: src.contentType });
+        } catch (error) {
+          failed.push({ path: filePath, error: error instanceof Error ? error.message : String(error) });
+        }
+      },
+      concurrency,
+    );
+
+    return { documents, fileCount: files.length, truncated, failed };
+  }
+
+  /**
+   * Push many documents back to DA in one call, concurrently. The "push" half
+   * of the bulk model. Returns per-document succeeded/failed (partial failures
+   * never abort the whole batch).
+   */
+  async pushDocuments(
+    documents: DaDocument[],
+    options: { concurrency?: number } = {},
+  ): Promise<DaPushResult> {
+    const concurrency = options.concurrency ?? 6;
+    const succeeded: string[] = [];
+    const failed: Array<{ path: string; error: string }> = [];
+    await this.mapWithConcurrency(
+      documents,
+      async (doc) => {
+        try {
+          await this.putSource(doc.path, doc.content, doc.contentType);
+          succeeded.push(doc.path);
+        } catch (error) {
+          failed.push({ path: doc.path, error: error instanceof Error ? error.message : String(error) });
+        }
+      },
+      concurrency,
+    );
+    return { succeeded, failed };
+  }
+
+  /** Run `fn` over `items` with at most `concurrency` in flight at once. */
+  private async mapWithConcurrency<T>(
+    items: T[],
+    fn: (item: T) => Promise<void>,
+    concurrency: number,
+  ): Promise<void> {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        await fn(items[index]);
+      }
+    };
+    const size = Math.max(1, Math.min(concurrency, items.length));
+    await Promise.all(Array.from({ length: size }, () => worker()));
   }
 
   // -------------------------------------------------------------------------

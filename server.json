@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.focusgts/eds-mcp-server",
-  "description": "28 tools for Adobe Edge Delivery Services: preview, publish, analytics, and content ops",
+  "description": "30 tools for Adobe Edge Delivery Services: preview, publish, analytics, and content ops",
   "repository": {
     "url": "https://github.com/Focus-GTS/eds-mcp-server",
     "source": "github"
