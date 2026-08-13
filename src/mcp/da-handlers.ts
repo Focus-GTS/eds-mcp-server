@@ -106,20 +106,42 @@ export async function handleDaExport(
 ) {
   try {
     const result = await client.exportTree(args.path, { maxFiles: args.maxFiles });
-    if (result.documents.length === 0 && result.failed.length === 0) {
-      return textResult(`No documents found under /${args.path.replace(/^\/+/, '')}.`);
+    const root = `/${args.path.replace(/^\/+/, '')}`;
+    if (result.documents.length === 0 && result.failed.length === 0 && !result.truncated) {
+      return textResult(`No documents found under ${root}.`);
     }
     const header = [
-      `Exported ${result.documents.length} document${result.documents.length === 1 ? '' : 's'} from /${args.path.replace(/^\/+/, '')}.`,
+      `Exported ${result.documents.length} document${result.documents.length === 1 ? '' : 's'} from ${root}.`,
     ];
     if (result.truncated) {
-      header.push(`(Truncated at the maxFiles cap — narrow the path or raise maxFiles to get the rest.)`);
+      header.push(`(May be incomplete — hit the maxFiles cap with folders left. Narrow the path or raise maxFiles.)`);
     }
     if (result.failed.length > 0) {
-      header.push(`(${result.failed.length} file(s) could not be fetched: ${result.failed.map((f) => f.path).join(', ')})`);
+      header.push(`(${result.failed.length} item(s) could not be read: ${result.failed.map((f) => f.path).join(', ')})`);
     }
-    const body = result.documents.map((d) => `=== ${d.path} ===\n${d.content}`);
-    return textResult([...header, '', ...body].join('\n'));
+
+    // Bound the response size: inline document content up to a byte budget, then
+    // list the remaining paths so the agent knows they exist (fetch individually).
+    const MAX_OUTPUT_CHARS = 800_000;
+    const blocks: string[] = [];
+    const omitted: string[] = [];
+    let used = header.join('\n').length;
+    for (const d of result.documents) {
+      const block = `=== ${d.path} ===\n${d.content}`;
+      if (blocks.length === 0 || used + block.length <= MAX_OUTPUT_CHARS) {
+        blocks.push(block);
+        used += block.length + 1;
+      } else {
+        omitted.push(d.path);
+      }
+    }
+    if (omitted.length > 0) {
+      const shown = omitted.slice(0, 30).join(', ');
+      header.push(
+        `(${omitted.length} document(s) omitted from this response to stay within size limits — fetch individually with eds_da_get_source: ${shown}${omitted.length > 30 ? ', …' : ''})`,
+      );
+    }
+    return textResult([...header, '', ...blocks].join('\n'));
   } catch (error) {
     return errorResult(error);
   }

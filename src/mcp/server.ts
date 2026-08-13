@@ -443,8 +443,24 @@ export function createServer(options: EdsClientOptions): McpServer {
     {
       path: z
         .string()
+        .refine(
+          (v) =>
+            !v.split('/').some((s) => {
+              let decoded: string;
+              try {
+                decoded = decodeURIComponent(s);
+              } catch {
+                decoded = s;
+              }
+              return decoded === '..' || decoded === '.';
+            }),
+          { message: 'Path must not contain traversal segments (.. or .)' },
+        )
         .describe('DA folder path to export (e.g., "blog"); use "" for the whole site'),
-      maxFiles: positiveInt
+      maxFiles: z
+        .number()
+        .int()
+        .min(1)
         .max(1000)
         .optional()
         .describe('Maximum documents to fetch (default 100); result flags truncation if exceeded'),

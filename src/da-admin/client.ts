@@ -187,28 +187,54 @@ export class DaClient {
     const maxFiles = options.maxFiles ?? 100;
     const concurrency = options.concurrency ?? 6;
 
-    // Breadth-first discovery of file paths (folders end with '/').
+    // Only descend into folders under the requested root, so a stray or
+    // self-referential listing entry can't walk us out of the subtree.
+    const rootNorm = path.replace(/^\/+|\/+$/g, '');
+    const rootPrefix = rootNorm === '' ? '/' : `/${rootNorm}/`;
+    const inTree = (p: string): boolean =>
+      rootNorm === '' || p === `/${rootNorm}` || p.startsWith(rootPrefix);
+    const dirKey = (p: string): string => p.replace(/^\/+|\/+$/g, '');
+
+    // Breadth-first discovery of file paths (folders end with '/'). A `visited`
+    // set defends against cycles/duplicates; folder listings are guarded so one
+    // unreadable folder is recorded and skipped, not fatal to the whole export.
     const files: string[] = [];
+    const failed: Array<{ path: string; error: string }> = [];
+    const visited = new Set<string>();
     const queue: string[] = [path];
-    let truncated = false;
+    let skippedFile = false;
     while (queue.length > 0 && files.length < maxFiles) {
       const dir = queue.shift() as string;
-      const entries = await this.listSources(dir);
+      const key = dirKey(dir);
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      let entries: DaSourceEntry[];
+      try {
+        entries = await this.listSources(dir);
+      } catch (error) {
+        failed.push({ path: dir, error: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+
       for (const entry of entries) {
         if (!entry.path) continue;
         if (entry.path.endsWith('/')) {
-          queue.push(entry.path);
+          if (!visited.has(dirKey(entry.path)) && inTree(entry.path)) {
+            queue.push(entry.path);
+          }
         } else if (files.length < maxFiles) {
           files.push(entry.path);
         } else {
-          truncated = true;
+          skippedFile = true;
         }
       }
     }
-    if (queue.length > 0) truncated = true;
+    // Truncated only when we genuinely stopped short: a file was skipped, or we
+    // hit the cap with folders still unexplored.
+    const truncated = skippedFile || (files.length >= maxFiles && queue.length > 0);
 
     const documents: DaDocument[] = [];
-    const failed: Array<{ path: string; error: string }> = [];
     await this.mapWithConcurrency(
       files,
       async (filePath) => {

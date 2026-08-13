@@ -59,7 +59,7 @@ describe('Integration: MCP Server creation', () => {
     const { createServer } = await import('../src/mcp/server.js');
     const server = createServer({ owner: 'adobe', repo: 'helix-website' });
     expect(server).toBeDefined();
-    // Assert the real registered-tool count so the "28 tools" claim can't drift.
+    // Assert the real registered-tool count so the "30 tools" claim can't drift.
     const registered = (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
     const names = Object.keys(registered);
     expect(names).toHaveLength(30);

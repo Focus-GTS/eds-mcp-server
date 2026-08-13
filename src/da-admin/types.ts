@@ -79,7 +79,7 @@ export interface DaDocument {
 export interface DaExportResult {
   /** Every document fetched successfully under the exported path. */
   documents: DaDocument[];
-  /** Number of files discovered under the path. */
+  /** Number of files attempted (bounded by `maxFiles`), not necessarily all that exist. */
   fileCount: number;
   /** True when the subtree exceeded the `maxFiles` cap — some files omitted. */
   truncated: boolean;
