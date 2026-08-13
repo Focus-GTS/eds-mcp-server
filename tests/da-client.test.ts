@@ -67,16 +67,29 @@ describe('DaClient wire contract (admin.da.live)', () => {
   it('listSources GETs /list, strips the /{org}/{repo} prefix, and handles both shapes', async () => {
     const raw = [
       { path: '/o/r/blog/post.html', name: 'post.html', ext: 'html' },
-      { path: '/o/r/blog/drafts/', name: 'drafts' },
+      { path: '/o/r/blog/drafts', name: 'drafts' },
     ];
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, raw)));
     const out = await new DaClient(opts).listSources('blog');
     // A listed path is now site-relative and feeds straight back into get_source.
-    expect(out.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts/']);
+    expect(out.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts']);
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, { sources: raw, path: '/blog' })));
     const wrapped = await new DaClient(opts).listSources('blog');
-    expect(wrapped.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts/']);
+    expect(wrapped.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts']);
+  });
+
+  it('listSources follows the da-continuation-token across pages (no silent truncation)', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonRes(200, [{ path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' }], { 'da-continuation-token': 'tok2' }))
+      .mockResolvedValueOnce(jsonRes(200, [{ path: '/o/r/blog/b.html', name: 'b.html', ext: 'html' }])); // no token → last page
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await new DaClient(opts).listSources('blog');
+    expect(out.map((e) => e.path)).toEqual(['/blog/a.html', '/blog/b.html']); // both pages
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The 2nd request carried the continuation token from the 1st response.
+    expect((fetchMock.mock.calls[1][1].headers as Headers).get('da-continuation-token')).toBe('tok2');
   });
 
   it('putSource POSTs multipart form-data to /source with the content', async () => {
@@ -183,11 +196,11 @@ describe('DA bulk export/push (agent-native clone model)', () => {
     const { DaClient } = await import('../src/da-admin/client.js');
     vi.stubGlobal('fetch', router({
       'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
-        { path: '/o/r/blog/a.html', ext: 'html' },
-        { path: '/o/r/blog/sub/' },
+        { path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' },
+        { path: '/o/r/blog/sub', name: 'sub' }, // real DA folder: no ext, no trailing slash
       ]),
       'https://admin.da.live/list/o/r/blog/sub': () => jsonRes(200, [
-        { path: '/o/r/blog/sub/c.html', ext: 'html' },
+        { path: '/o/r/blog/sub/c.html', name: 'c.html', ext: 'html' },
       ]),
       'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, '<h1>a</h1>'),
       'https://admin.da.live/source/o/r/blog/sub/c.html': () => textRes(200, '<h1>c</h1>'),
@@ -250,27 +263,27 @@ describe('DA bulk export/push (agent-native clone model)', () => {
     const { DaClient } = await import('../src/da-admin/client.js');
     vi.stubGlobal('fetch', router({
       'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
-        { path: '/o/r/blog/a.html', ext: 'html' },
-        { path: '/o/r/blog/private/' },
+        { path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' },
+        { path: '/o/r/blog/private', name: 'private' }, // folder: no ext
       ]),
       'https://admin.da.live/list/o/r/blog/private': () => jsonRes(403, {}), // 403 → throws
       'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, '<h1>a</h1>'),
     }));
     const result = await new DaClient(opts).exportTree('blog');
     expect(result.documents.map((d) => d.path)).toEqual(['/blog/a.html']); // still returned
-    expect(result.failed.map((f) => f.path)).toEqual(['/blog/private/']); // recorded, not dropped
+    expect(result.failed.map((f) => f.path)).toEqual(['/blog/private']); // recorded, not dropped
   });
 
   it('does not escape the subtree or double-count a repeated/foreign folder (C2)', async () => {
     const { DaClient } = await import('../src/da-admin/client.js');
     const fetchMock = router({
       'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
-        { path: '/o/r/blog/a.html', ext: 'html' },
-        { path: '/o/r/blog/sub/' }, // in-tree
-        { path: '/o/r/other/' }, // OUT of subtree — must not be walked
-        { path: '/o/r/blog/sub/' }, // duplicate — must not double-walk
+        { path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' },
+        { path: '/o/r/blog/sub', name: 'sub' }, // in-tree folder (no ext)
+        { path: '/o/r/other', name: 'other' }, // OUT of subtree — must not be walked
+        { path: '/o/r/blog/sub', name: 'sub' }, // duplicate — must not double-walk
       ]),
-      'https://admin.da.live/list/o/r/blog/sub': () => jsonRes(200, [{ path: '/o/r/blog/sub/c.html', ext: 'html' }]),
+      'https://admin.da.live/list/o/r/blog/sub': () => jsonRes(200, [{ path: '/o/r/blog/sub/c.html', name: 'c.html', ext: 'html' }]),
       'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, 'a'),
       'https://admin.da.live/source/o/r/blog/sub/c.html': () => textRes(200, 'c'),
     });

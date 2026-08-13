@@ -50,6 +50,27 @@
           "format": "string",
           "isSecret": true,
           "name": "EDS_DOMAIN_KEY"
+        },
+        {
+          "description": "Document Authoring IMS access token — enables the eds_da_* source and bulk tools",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "EDS_DA_TOKEN"
+        },
+        {
+          "description": "Document Authoring org (defaults to EDS_OWNER)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "EDS_DA_ORG"
+        },
+        {
+          "description": "Document Authoring repo/site (defaults to EDS_REPO)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "EDS_DA_REPO"
         }
       ]
     }

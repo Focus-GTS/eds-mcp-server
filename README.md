@@ -30,6 +30,7 @@ Then just ask your agent:
 > *"Preview and publish the homepage."*
 > *"What are the Core Web Vitals across the site?"*
 > *"Find every page about pricing and list the ones missing a description."*
+> *"Export the whole `/blog` folder, fix every heading, and push it back."*
 
 That's it — no local AEM, no scripts, no glue code.
 
@@ -43,9 +44,11 @@ flowchart LR
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
+  B --> G["Document Authoring<br/>admin.da.live"]
   C --> F["Your EDS site"]
   D --> F
   E --> F
+  G --> F
 ```
 
 The agent calls tools; the server talks to the live EDS infrastructure. Read-only tools (content, sitemap, metadata) need no credentials at all.
@@ -73,6 +76,8 @@ sequenceDiagram
 ---
 
 ## 🛠️ The 30 tools
+
+### Edge Delivery Services — publish, content, analytics
 
 <table>
 <tr><td valign="top" width="33%">
@@ -111,10 +116,36 @@ sequenceDiagram
 </td></tr>
 </table>
 
-**Document Authoring (DA)** — direct access to the authored source, not the rendered output (requires `EDS_DA_TOKEN`):
-`eds_da_list_sources` · `eds_da_get_source` · `eds_da_put_source` · `eds_da_delete_source` · `eds_da_copy_source` · `eds_da_move_source` · `eds_da_get_versions` · **`eds_da_export`** · **`eds_da_push`**
+### Document Authoring (DA) — the authored *source*, not the rendered output
 
-> **Bulk content ops** — `eds_da_export` pulls a whole DA subtree in one call and `eds_da_push` writes a batch back in one call: the efficiency of `aem content clone` (bulk-fetch → operate → bulk-push) for agents, with no local checkout.
+Nine tools reach a site's Document Authoring source directly (`admin.da.live`), the source of truth behind an EDS site. Requires `EDS_DA_TOKEN`.
+
+<table>
+<tr><td valign="top" width="33%">
+
+**Read**
+- `eds_da_list_sources`
+- `eds_da_get_source`
+- `eds_da_get_versions`
+
+</td><td valign="top" width="33%">
+
+**Write**
+- `eds_da_put_source`
+- `eds_da_delete_source`
+- `eds_da_copy_source`
+- `eds_da_move_source`
+
+</td><td valign="top" width="33%">
+
+**Bulk ("clone")**
+- `eds_da_export`
+- `eds_da_push`
+
+</td></tr>
+</table>
+
+> **`eds_da_export` / `eds_da_push`** bring the efficiency of `aem content clone` to agents: export a whole DA subtree in **one** call, operate on it, and push the batch back in **one** call — no local checkout, no `aem-cli`. Same model, network-native.
 >
 > `EDS_DA_TOKEN` is an Adobe IMS access token for Document Authoring — grab it from an authenticated [da.live](https://da.live) session (the IMS `access_token`). Document paths assume `.html` when no extension is given (`index` → `index.html`).
 
@@ -173,7 +204,7 @@ claude mcp add eds -e EDS_OWNER=your-org -e EDS_REPO=your-site -- npx @focusgts/
 | `EDS_REF` | No | Git branch (default: `main`) |
 | `EDS_API_KEY` | No | Admin token (see Authentication). Browser login is the alternative. |
 | `EDS_DOMAIN_KEY` | No | OpTel domain key for analytics queries (CWV, 404s, experiments) |
-| `EDS_DA_TOKEN` | No | Document Authoring API token — enables the `eds_da_*` source tools |
+| `EDS_DA_TOKEN` | No | Document Authoring IMS access token — enables the `eds_da_*` source & bulk tools |
 | `EDS_DA_ORG` | No | DA org (defaults to `EDS_OWNER`) |
 | `EDS_DA_REPO` | No | DA repo/site (defaults to `EDS_REPO`) |
 

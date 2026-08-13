@@ -58,23 +58,48 @@ export class DaClient {
   // Content operations
   // -------------------------------------------------------------------------
 
-  /** List sources/directories under a path — GET /list/{org}/{repo}[/{path}]. */
+  /**
+   * List sources/directories under a path — GET /list/{org}/{repo}[/{path}].
+   *
+   * DA paginates the listing (S3's 1000-key default) via the
+   * `da-continuation-token` header, in and out. We follow it to completion so
+   * large folders aren't silently truncated (which would make an export report
+   * "complete" while missing files).
+   */
   async listSources(path?: string): Promise<DaSourceEntry[]> {
     const suffix = path ? `/${this.normalizePath(path)}` : '';
-    const res = await this.request(`/list/${this.org}/${this.repo}${suffix}`, {
-      method: 'GET',
-    });
-    const body = (await res.json().catch(() => null)) as unknown;
-    // The API may return a bare array or a { sources: [...] } wrapper.
-    let entries: DaSourceEntry[] = [];
-    if (Array.isArray(body)) {
-      entries = body as DaSourceEntry[];
-    } else if (body && typeof body === 'object' && Array.isArray((body as { sources?: unknown }).sources)) {
-      entries = (body as { sources: DaSourceEntry[] }).sources;
+    const endpoint = `/list/${this.org}/${this.repo}${suffix}`;
+    const all: DaSourceEntry[] = [];
+    let token: string | null = null;
+    // Safety cap so a misbehaving token loop can't run forever (~50k entries).
+    for (let page = 0; page < 50; page++) {
+      const res = await this.request(endpoint, {
+        method: 'GET',
+        headers: token ? { 'da-continuation-token': token } : undefined,
+      });
+      const body = (await res.json().catch(() => null)) as unknown;
+      // The API may return a bare array or a { sources: [...] } wrapper.
+      let entries: DaSourceEntry[] = [];
+      if (Array.isArray(body)) {
+        entries = body as DaSourceEntry[];
+      } else if (body && typeof body === 'object' && Array.isArray((body as { sources?: unknown }).sources)) {
+        entries = (body as { sources: DaSourceEntry[] }).sources;
+      }
+      // DA list paths include the /{org}/{repo} prefix; strip it so a listed
+      // path is site-relative and can be passed back to get_source/put_source.
+      for (const e of entries) all.push({ ...e, path: this.stripSitePrefix(e.path) });
+
+      token = res.headers.get('da-continuation-token') || null;
+      if (!token) break;
     }
-    // DA list paths include the /{org}/{repo} prefix; strip it so a listed path
-    // is site-relative and can be passed straight back to get_source/put_source.
-    return entries.map((e) => ({ ...e, path: this.stripSitePrefix(e.path) }));
+    return all;
+  }
+
+  /** True when a listing entry is a file (has a file extension); DA folders have none. */
+  private hasExtension(entry: DaSourceEntry): boolean {
+    if (typeof entry.ext === 'string' && entry.ext.length > 0) return true;
+    const last = (entry.path ?? '').split('/').pop() ?? '';
+    return last.lastIndexOf('.') > 0;
   }
 
   /** Remove the leading /{org}/{repo} from a DA-returned path. */
@@ -219,10 +244,19 @@ export class DaClient {
 
       for (const entry of entries) {
         if (!entry.path) continue;
-        if (entry.path.endsWith('/')) {
+        // DA marks folders by the ABSENCE of a file extension (verified against
+        // adobe/da-admin formatList: CommonPrefixes → { path, name } with no
+        // `ext`; folder paths have no trailing slash). A trailing-slash check
+        // would never match a real folder and silently flatten the export.
+        const isFolder = !this.hasExtension(entry);
+        if (isFolder) {
           if (!visited.has(dirKey(entry.path)) && inTree(entry.path)) {
             queue.push(entry.path);
           }
+        } else if (!inTree(entry.path)) {
+          // A file outside the requested subtree (shouldn't happen, but the
+          // containment invariant applies to files too, not just folders).
+          continue;
         } else if (files.length < maxFiles) {
           files.push(entry.path);
         } else {
