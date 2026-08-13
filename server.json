@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.focusgts/eds-mcp-server",
-  "description": "28 tools for Adobe Edge Delivery Services: preview, publish, analytics, and content ops",
+  "description": "30 tools for Adobe Edge Delivery Services: preview, publish, analytics, and content ops",
   "repository": {
     "url": "https://github.com/Focus-GTS/eds-mcp-server",
     "source": "github"
@@ -50,6 +50,27 @@
           "format": "string",
           "isSecret": true,
           "name": "EDS_DOMAIN_KEY"
+        },
+        {
+          "description": "Document Authoring IMS access token — enables the eds_da_* source and bulk tools",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "EDS_DA_TOKEN"
+        },
+        {
+          "description": "Document Authoring org (defaults to EDS_OWNER)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "EDS_DA_ORG"
+        },
+        {
+          "description": "Document Authoring repo/site (defaults to EDS_REPO)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "EDS_DA_REPO"
         }
       ]
     }

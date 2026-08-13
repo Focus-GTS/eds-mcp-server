@@ -8,6 +8,8 @@ import {
   handleDaCopySource,
   handleDaMoveSource,
   handleDaGetVersions,
+  handleDaExport,
+  handleDaPush,
 } from '../src/mcp/da-handlers.js';
 
 function jsonRes(status: number, body: unknown, headers: Record<string, string> = {}) {
@@ -65,16 +67,29 @@ describe('DaClient wire contract (admin.da.live)', () => {
   it('listSources GETs /list, strips the /{org}/{repo} prefix, and handles both shapes', async () => {
     const raw = [
       { path: '/o/r/blog/post.html', name: 'post.html', ext: 'html' },
-      { path: '/o/r/blog/drafts/', name: 'drafts' },
+      { path: '/o/r/blog/drafts', name: 'drafts' },
     ];
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, raw)));
     const out = await new DaClient(opts).listSources('blog');
     // A listed path is now site-relative and feeds straight back into get_source.
-    expect(out.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts/']);
+    expect(out.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts']);
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, { sources: raw, path: '/blog' })));
     const wrapped = await new DaClient(opts).listSources('blog');
-    expect(wrapped.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts/']);
+    expect(wrapped.map((e) => e.path)).toEqual(['/blog/post.html', '/blog/drafts']);
+  });
+
+  it('listSources follows the da-continuation-token across pages (no silent truncation)', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonRes(200, [{ path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' }], { 'da-continuation-token': 'tok2' }))
+      .mockResolvedValueOnce(jsonRes(200, [{ path: '/o/r/blog/b.html', name: 'b.html', ext: 'html' }])); // no token → last page
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await new DaClient(opts).listSources('blog');
+    expect(out.map((e) => e.path)).toEqual(['/blog/a.html', '/blog/b.html']); // both pages
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The 2nd request carried the continuation token from the 1st response.
+    expect((fetchMock.mock.calls[1][1].headers as Headers).get('da-continuation-token')).toBe('tok2');
   });
 
   it('putSource POSTs multipart form-data to /source with the content', async () => {
@@ -160,6 +175,165 @@ describe('DaClient auth + errors', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(new DaClient({ ...opts, retryBaseMs: 0 }).putSource('a', 'x')).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DA bulk export/push (agent-native clone model)', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Route fetch by URL so we can simulate the recursive list + get fan-out.
+  function router(map: Record<string, () => ReturnType<typeof jsonRes>>) {
+    return vi.fn((url: unknown) => {
+      const key = String(url);
+      const make = map[key];
+      if (make) return Promise.resolve(make());
+      return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found', headers: new Headers(), text: () => Promise.resolve('') });
+    });
+  }
+
+  it('exportTree recurses into folders and fetches every source in one call', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
+        { path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' },
+        { path: '/o/r/blog/sub', name: 'sub' }, // real DA folder: no ext, no trailing slash
+      ]),
+      'https://admin.da.live/list/o/r/blog/sub': () => jsonRes(200, [
+        { path: '/o/r/blog/sub/c.html', name: 'c.html', ext: 'html' },
+      ]),
+      'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, '<h1>a</h1>'),
+      'https://admin.da.live/source/o/r/blog/sub/c.html': () => textRes(200, '<h1>c</h1>'),
+    }));
+    const result = await new DaClient(opts).exportTree('blog');
+    expect(result.fileCount).toBe(2);
+    expect(result.documents.map((d) => d.path).sort()).toEqual(['/blog/a.html', '/blog/sub/c.html']);
+    expect(result.documents.find((d) => d.path === '/blog/a.html')?.content).toBe('<h1>a</h1>');
+    expect(result.truncated).toBe(false);
+    expect(result.failed).toEqual([]);
+  });
+
+  it('exportTree honors maxFiles and flags truncation', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
+        { path: '/o/r/blog/a.html', ext: 'html' },
+        { path: '/o/r/blog/b.html', ext: 'html' },
+        { path: '/o/r/blog/c.html', ext: 'html' },
+      ]),
+      'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, 'a'),
+      'https://admin.da.live/source/o/r/blog/b.html': () => textRes(200, 'b'),
+      'https://admin.da.live/source/o/r/blog/c.html': () => textRes(200, 'c'),
+    }));
+    const result = await new DaClient(opts).exportTree('blog', { maxFiles: 2 });
+    expect(result.fileCount).toBe(2);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('exportTree records a file that fails to fetch instead of dropping it', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
+        { path: '/o/r/blog/ok.html', ext: 'html' },
+        { path: '/o/r/blog/bad.html', ext: 'html' },
+      ]),
+      'https://admin.da.live/source/o/r/blog/ok.html': () => textRes(200, '<h1>ok</h1>'),
+      // bad.html falls through to the 404 default
+    }));
+    const result = await new DaClient(opts).exportTree('blog');
+    expect(result.documents.map((d) => d.path)).toEqual(['/blog/ok.html']);
+    expect(result.failed.map((f) => f.path)).toEqual(['/blog/bad.html']);
+  });
+
+  it('pushDocuments writes a batch and reports succeeded/failed', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/source/o/r/good.html': () => jsonRes(200, {}),
+      // bad.html → 404 default (failure)
+    }));
+    const result = await new DaClient(opts).pushDocuments([
+      { path: 'good', content: '<p>g</p>' },
+      { path: 'bad', content: '<p>b</p>' },
+    ]);
+    expect(result.succeeded).toEqual(['good']);
+    expect(result.failed.map((f) => f.path)).toEqual(['bad']);
+  });
+
+  it('a folder that fails to list is recorded, not fatal (C1)', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
+        { path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' },
+        { path: '/o/r/blog/private', name: 'private' }, // folder: no ext
+      ]),
+      'https://admin.da.live/list/o/r/blog/private': () => jsonRes(403, {}), // 403 → throws
+      'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, '<h1>a</h1>'),
+    }));
+    const result = await new DaClient(opts).exportTree('blog');
+    expect(result.documents.map((d) => d.path)).toEqual(['/blog/a.html']); // still returned
+    expect(result.failed.map((f) => f.path)).toEqual(['/blog/private']); // recorded, not dropped
+  });
+
+  it('does not escape the subtree or double-count a repeated/foreign folder (C2)', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    const fetchMock = router({
+      'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
+        { path: '/o/r/blog/a.html', name: 'a.html', ext: 'html' },
+        { path: '/o/r/blog/sub', name: 'sub' }, // in-tree folder (no ext)
+        { path: '/o/r/other', name: 'other' }, // OUT of subtree — must not be walked
+        { path: '/o/r/blog/sub', name: 'sub' }, // duplicate — must not double-walk
+      ]),
+      'https://admin.da.live/list/o/r/blog/sub': () => jsonRes(200, [{ path: '/o/r/blog/sub/c.html', name: 'c.html', ext: 'html' }]),
+      'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, 'a'),
+      'https://admin.da.live/source/o/r/blog/sub/c.html': () => textRes(200, 'c'),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new DaClient(opts).exportTree('blog');
+    expect(result.documents.map((d) => d.path).sort()).toEqual(['/blog/a.html', '/blog/sub/c.html']);
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls).not.toContain('https://admin.da.live/list/o/r/other'); // never escaped the subtree
+    expect(urls.filter((u) => u === 'https://admin.da.live/list/o/r/blog/sub')).toHaveLength(1); // walked once
+  });
+
+  it('handleDaExport bounds the response size and lists omitted docs (C4)', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    const big = 'x'.repeat(300_000);
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [
+        { path: '/o/r/blog/1.html', ext: 'html' },
+        { path: '/o/r/blog/2.html', ext: 'html' },
+        { path: '/o/r/blog/3.html', ext: 'html' },
+        { path: '/o/r/blog/4.html', ext: 'html' },
+      ]),
+      'https://admin.da.live/source/o/r/blog/1.html': () => textRes(200, big),
+      'https://admin.da.live/source/o/r/blog/2.html': () => textRes(200, big),
+      'https://admin.da.live/source/o/r/blog/3.html': () => textRes(200, big),
+      'https://admin.da.live/source/o/r/blog/4.html': () => textRes(200, big),
+    }));
+    const result = await handleDaExport(new DaClient(opts), { path: 'blog' });
+    expect(result.content[0].text.length).toBeLessThan(1_000_000); // 4×300KB would be 1.2MB
+    expect(result.content[0].text).toContain('omitted from this response');
+  });
+
+  it('handleDaExport delimits each document by path', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/list/o/r/blog': () => jsonRes(200, [{ path: '/o/r/blog/a.html', ext: 'html' }]),
+      'https://admin.da.live/source/o/r/blog/a.html': () => textRes(200, '<h1>a</h1>'),
+    }));
+    const result = await handleDaExport(new DaClient(opts), { path: 'blog' });
+    expect(result.content[0].text).toContain('Exported 1 document');
+    expect(result.content[0].text).toContain('=== /blog/a.html ===');
+    expect(result.content[0].text).toContain('<h1>a</h1>');
+  });
+
+  it('handleDaPush summarizes the batch result', async () => {
+    const { DaClient } = await import('../src/da-admin/client.js');
+    vi.stubGlobal('fetch', router({
+      'https://admin.da.live/source/o/r/x.html': () => jsonRes(200, {}),
+    }));
+    const result = await handleDaPush(new DaClient(opts), { documents: [{ path: 'x', content: '<p>x</p>' }] });
+    expect(result.content[0].text).toContain('Pushed 1 document');
   });
 });
 

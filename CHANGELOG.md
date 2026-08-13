@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bulk content operations — the agent-native "clone" model** (ADR-008). Two
+  tools deliver the efficiency of `aem content clone` (bulk-fetch → operate →
+  bulk-push) for agents, with no local checkout or `aem-cli` dependency:
+  - `eds_da_export` — recursively fetch a whole DA subtree in one call
+    (bounded concurrency), returning every document's source. Capped by
+    `maxFiles` with a `truncated` flag; individual fetch failures are reported,
+    never dropped silently.
+  - `eds_da_push` — write many `{ path, content }` documents back in one call
+    (bounded concurrency), returning per-document succeeded/failed.
+  Both run through the v0.5.0 `DaClient` (same auth, `.html` normalization,
+  traversal guard, bounded retry). 30 tools total.
+
 ## [0.5.0] - 2026-08-12
 
 ### Added

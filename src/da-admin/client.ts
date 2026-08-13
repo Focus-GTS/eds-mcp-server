@@ -14,6 +14,9 @@ import type {
   DaSourceContent,
   DaVersion,
   DaOperationResponse,
+  DaDocument,
+  DaExportResult,
+  DaPushResult,
 } from './types.js';
 import { EdsApiError } from '../utils/errors.js';
 
@@ -55,23 +58,48 @@ export class DaClient {
   // Content operations
   // -------------------------------------------------------------------------
 
-  /** List sources/directories under a path — GET /list/{org}/{repo}[/{path}]. */
+  /**
+   * List sources/directories under a path — GET /list/{org}/{repo}[/{path}].
+   *
+   * DA paginates the listing (S3's 1000-key default) via the
+   * `da-continuation-token` header, in and out. We follow it to completion so
+   * large folders aren't silently truncated (which would make an export report
+   * "complete" while missing files).
+   */
   async listSources(path?: string): Promise<DaSourceEntry[]> {
     const suffix = path ? `/${this.normalizePath(path)}` : '';
-    const res = await this.request(`/list/${this.org}/${this.repo}${suffix}`, {
-      method: 'GET',
-    });
-    const body = (await res.json().catch(() => null)) as unknown;
-    // The API may return a bare array or a { sources: [...] } wrapper.
-    let entries: DaSourceEntry[] = [];
-    if (Array.isArray(body)) {
-      entries = body as DaSourceEntry[];
-    } else if (body && typeof body === 'object' && Array.isArray((body as { sources?: unknown }).sources)) {
-      entries = (body as { sources: DaSourceEntry[] }).sources;
+    const endpoint = `/list/${this.org}/${this.repo}${suffix}`;
+    const all: DaSourceEntry[] = [];
+    let token: string | null = null;
+    // Safety cap so a misbehaving token loop can't run forever (~50k entries).
+    for (let page = 0; page < 50; page++) {
+      const res = await this.request(endpoint, {
+        method: 'GET',
+        headers: token ? { 'da-continuation-token': token } : undefined,
+      });
+      const body = (await res.json().catch(() => null)) as unknown;
+      // The API may return a bare array or a { sources: [...] } wrapper.
+      let entries: DaSourceEntry[] = [];
+      if (Array.isArray(body)) {
+        entries = body as DaSourceEntry[];
+      } else if (body && typeof body === 'object' && Array.isArray((body as { sources?: unknown }).sources)) {
+        entries = (body as { sources: DaSourceEntry[] }).sources;
+      }
+      // DA list paths include the /{org}/{repo} prefix; strip it so a listed
+      // path is site-relative and can be passed back to get_source/put_source.
+      for (const e of entries) all.push({ ...e, path: this.stripSitePrefix(e.path) });
+
+      token = res.headers.get('da-continuation-token') || null;
+      if (!token) break;
     }
-    // DA list paths include the /{org}/{repo} prefix; strip it so a listed path
-    // is site-relative and can be passed straight back to get_source/put_source.
-    return entries.map((e) => ({ ...e, path: this.stripSitePrefix(e.path) }));
+    return all;
+  }
+
+  /** True when a listing entry is a file (has a file extension); DA folders have none. */
+  private hasExtension(entry: DaSourceEntry): boolean {
+    if (typeof entry.ext === 'string' && entry.ext.length > 0) return true;
+    const last = (entry.path ?? '').split('/').pop() ?? '';
+    return last.lastIndexOf('.') > 0;
   }
 
   /** Remove the leading /{org}/{repo} from a DA-returned path. */
@@ -164,6 +192,142 @@ export class DaClient {
       return (body as { versions: DaVersion[] }).versions;
     }
     return [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Bulk content operations (the agent-native "clone" model, ADR-008)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Export a whole DA subtree in one call: recursively list every document
+   * under `path` and fetch its source concurrently. This is the agent-native
+   * "clone" read — one call instead of the agent orchestrating N list+get
+   * calls. Bounded by `maxFiles` (flags `truncated`) and resilient to
+   * individual fetch failures (reported in `failed`, never dropped silently).
+   */
+  async exportTree(
+    path: string,
+    options: { maxFiles?: number; concurrency?: number } = {},
+  ): Promise<DaExportResult> {
+    const maxFiles = options.maxFiles ?? 100;
+    const concurrency = options.concurrency ?? 6;
+
+    // Only descend into folders under the requested root, so a stray or
+    // self-referential listing entry can't walk us out of the subtree.
+    const rootNorm = path.replace(/^\/+|\/+$/g, '');
+    const rootPrefix = rootNorm === '' ? '/' : `/${rootNorm}/`;
+    const inTree = (p: string): boolean =>
+      rootNorm === '' || p === `/${rootNorm}` || p.startsWith(rootPrefix);
+    const dirKey = (p: string): string => p.replace(/^\/+|\/+$/g, '');
+
+    // Breadth-first discovery of file paths (folders end with '/'). A `visited`
+    // set defends against cycles/duplicates; folder listings are guarded so one
+    // unreadable folder is recorded and skipped, not fatal to the whole export.
+    const files: string[] = [];
+    const failed: Array<{ path: string; error: string }> = [];
+    const visited = new Set<string>();
+    const queue: string[] = [path];
+    let skippedFile = false;
+    while (queue.length > 0 && files.length < maxFiles) {
+      const dir = queue.shift() as string;
+      const key = dirKey(dir);
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      let entries: DaSourceEntry[];
+      try {
+        entries = await this.listSources(dir);
+      } catch (error) {
+        failed.push({ path: dir, error: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.path) continue;
+        // DA marks folders by the ABSENCE of a file extension (verified against
+        // adobe/da-admin formatList: CommonPrefixes → { path, name } with no
+        // `ext`; folder paths have no trailing slash). A trailing-slash check
+        // would never match a real folder and silently flatten the export.
+        const isFolder = !this.hasExtension(entry);
+        if (isFolder) {
+          if (!visited.has(dirKey(entry.path)) && inTree(entry.path)) {
+            queue.push(entry.path);
+          }
+        } else if (!inTree(entry.path)) {
+          // A file outside the requested subtree (shouldn't happen, but the
+          // containment invariant applies to files too, not just folders).
+          continue;
+        } else if (files.length < maxFiles) {
+          files.push(entry.path);
+        } else {
+          skippedFile = true;
+        }
+      }
+    }
+    // Truncated only when we genuinely stopped short: a file was skipped, or we
+    // hit the cap with folders still unexplored.
+    const truncated = skippedFile || (files.length >= maxFiles && queue.length > 0);
+
+    const documents: DaDocument[] = [];
+    await this.mapWithConcurrency(
+      files,
+      async (filePath) => {
+        try {
+          const src = await this.getSource(filePath);
+          documents.push({ path: src.path, content: src.content, contentType: src.contentType });
+        } catch (error) {
+          failed.push({ path: filePath, error: error instanceof Error ? error.message : String(error) });
+        }
+      },
+      concurrency,
+    );
+
+    return { documents, fileCount: files.length, truncated, failed };
+  }
+
+  /**
+   * Push many documents back to DA in one call, concurrently. The "push" half
+   * of the bulk model. Returns per-document succeeded/failed (partial failures
+   * never abort the whole batch).
+   */
+  async pushDocuments(
+    documents: DaDocument[],
+    options: { concurrency?: number } = {},
+  ): Promise<DaPushResult> {
+    const concurrency = options.concurrency ?? 6;
+    const succeeded: string[] = [];
+    const failed: Array<{ path: string; error: string }> = [];
+    await this.mapWithConcurrency(
+      documents,
+      async (doc) => {
+        try {
+          await this.putSource(doc.path, doc.content, doc.contentType);
+          succeeded.push(doc.path);
+        } catch (error) {
+          failed.push({ path: doc.path, error: error instanceof Error ? error.message : String(error) });
+        }
+      },
+      concurrency,
+    );
+    return { succeeded, failed };
+  }
+
+  /** Run `fn` over `items` with at most `concurrency` in flight at once. */
+  private async mapWithConcurrency<T>(
+    items: T[],
+    fn: (item: T) => Promise<void>,
+    concurrency: number,
+  ): Promise<void> {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        await fn(items[index]);
+      }
+    };
+    const size = Math.max(1, Math.min(concurrency, items.length));
+    await Promise.all(Array.from({ length: size }, () => worker()));
   }
 
   // -------------------------------------------------------------------------

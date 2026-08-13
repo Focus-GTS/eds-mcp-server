@@ -15,6 +15,9 @@
  *   EDS_REF        — Git ref / branch (default: "main")
  *   EDS_API_KEY    — Admin API key for preview / publish / cache operations
  *   EDS_DOMAIN_KEY — OpTel domain key for CWV / 404 / experiment queries
+ *   EDS_DA_TOKEN   — Document Authoring IMS token (enables the eds_da_* tools)
+ *   EDS_DA_ORG     — DA org (default: EDS_OWNER)
+ *   EDS_DA_REPO    — DA repo/site (default: EDS_REPO)
  */
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -122,6 +125,7 @@ if (!owner || !repo) {
       '  EDS_REF        Git ref / branch (default: main)',
       '  EDS_API_KEY    Admin API key for write operations',
       '  EDS_DOMAIN_KEY OpTel domain key for analytics queries',
+      '  EDS_DA_TOKEN   Document Authoring token (enables the eds_da_* tools)',
       '',
     ].join('\n'),
   );

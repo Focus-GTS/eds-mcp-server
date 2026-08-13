@@ -30,9 +30,11 @@ export async function handleDaListSources(
     }
     const lines = [`DA sources: ${entries.length}`, ''];
     for (const e of entries) {
-      // Paths are site-relative and already carry a file extension (files) or a
-      // trailing slash (folders), so they read cleanly as-is.
-      lines.push(`  ${e.path ?? e.name ?? '(unnamed)'}`);
+      const p = e.path ?? e.name ?? '(unnamed)';
+      // DA folders have no extension; mark them with a trailing slash so the
+      // listing distinguishes folders from files at a glance.
+      const isFolder = !e.ext && !/\.[^/]+$/.test(p);
+      lines.push(`  ${p}${isFolder && !p.endsWith('/') ? '/' : ''}`);
     }
     return textResult(lines.join('\n'));
   } catch (error) {
@@ -95,6 +97,76 @@ export async function handleDaMoveSource(
   try {
     const result = await client.moveSource(args.from, args.to);
     return textResult(`Moved /${args.from.replace(/^\/+/, '')} → ${result.path} (status ${result.status}).`);
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handleDaExport(
+  client: DaClient,
+  args: { path: string; maxFiles?: number },
+) {
+  try {
+    const result = await client.exportTree(args.path, { maxFiles: args.maxFiles });
+    const root = `/${args.path.replace(/^\/+/, '')}`;
+    if (result.documents.length === 0 && result.failed.length === 0 && !result.truncated) {
+      return textResult(`No documents found under ${root}.`);
+    }
+    const header = [
+      `Exported ${result.documents.length} document${result.documents.length === 1 ? '' : 's'} from ${root}.`,
+    ];
+    if (result.truncated) {
+      header.push(`(May be incomplete — hit the maxFiles cap with folders left. Narrow the path or raise maxFiles.)`);
+    }
+    if (result.failed.length > 0) {
+      header.push(`(${result.failed.length} item(s) could not be read: ${result.failed.map((f) => f.path).join(', ')})`);
+    }
+
+    // Bound the response size: inline document content up to a byte budget, then
+    // list the remaining paths so the agent knows they exist (fetch individually).
+    const MAX_OUTPUT_CHARS = 800_000;
+    const blocks: string[] = [];
+    const omitted: string[] = [];
+    let used = header.join('\n').length;
+    for (const d of result.documents) {
+      const block = `=== ${d.path} ===\n${d.content}`;
+      if (blocks.length === 0 || used + block.length <= MAX_OUTPUT_CHARS) {
+        blocks.push(block);
+        used += block.length + 1;
+      } else {
+        omitted.push(d.path);
+      }
+    }
+    if (omitted.length > 0) {
+      const shown = omitted.slice(0, 30).join(', ');
+      header.push(
+        `(${omitted.length} document(s) omitted from this response to stay within size limits — fetch individually with eds_da_get_source: ${shown}${omitted.length > 30 ? ', …' : ''})`,
+      );
+    }
+    return textResult([...header, '', ...blocks].join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handleDaPush(
+  client: DaClient,
+  args: { documents: Array<{ path: string; content: string; contentType?: string }> },
+) {
+  try {
+    const result = await client.pushDocuments(args.documents);
+    const lines = [
+      `Pushed ${result.succeeded.length} document${result.succeeded.length === 1 ? '' : 's'}; ${result.failed.length} failed.`,
+    ];
+    if (result.succeeded.length > 0) {
+      lines.push('', 'Succeeded:');
+      for (const p of result.succeeded) lines.push(`  ✓ ${p}`);
+    }
+    if (result.failed.length > 0) {
+      lines.push('', 'Failed:');
+      for (const f of result.failed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+    }
+    return textResult(lines.join('\n'));
   } catch (error) {
     return errorResult(error);
   }
