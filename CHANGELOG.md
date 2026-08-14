@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Content audit — find what's wrong** (ADR-010). A read-only quality-audit
+  layer that returns a prioritized, actionable findings list:
+  - `eds_audit_page` — SEO + accessibility checks on a single page's HTML
+    (missing/short title & description, no/duplicate H1, noindex, missing
+    canonical/OG/JSON-LD; images without alt text, heading-level skips, missing
+    landmarks, missing `lang`, unlabeled form inputs).
+  - `eds_audit_site` — bulk sweep (bounded concurrency, `maxPages` cap) running
+    the per-page checks across the page index plus site-level checks: freshness
+    (query-index `lastModified`), sitemap coverage, and — when a `domain` is
+    supplied — performance (Core Web Vitals) and 404s from Adobe RUM. Filter by
+    `pathPrefix` and `dimensions`.
+  Findings use a unified severity-first shape (`critical`/`warning`/`info` +
+  dimension + suggested fix). RUM dimensions are recorded in `skipped` (never
+  dropped silently) when no domain/key is available. No Google PageSpeed
+  dependency — performance uses Adobe's own real-user data. 33 tools total.
+
 ## [0.7.0] - 2026-08-14
 
 ### Added

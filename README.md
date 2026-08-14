@@ -10,7 +10,7 @@
 
 ### Let an AI agent run your Adobe Edge Delivery site.
 
-**31 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**33 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 ![Ask your agent](https://readme-typing-svg.demolab.com/?font=JetBrains+Mono&size=20&duration=2600&pause=800&color=6E56CF&center=true&vCenter=true&width=640&height=42&lines=%22Preview+and+publish+the+homepage%22;%22What+are+the+Core+Web+Vitals%3F%22;%22Find+pages+missing+a+description%22;%22Publish+all+the+blog+posts%22)
@@ -40,7 +40,7 @@ That's it — no local AEM, no scripts, no glue code.
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>31 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>33 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -75,7 +75,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 31 tools
+## 🛠️ The 33 tools
 
 ### Edge Delivery Services — publish, content, analytics
 
@@ -151,6 +151,13 @@ Nine tools reach a site's Document Authoring source directly (`admin.da.live`), 
 > **Safe by default.** `eds_da_push` takes `dryRun: true` to **preview** exactly what a bulk edit would do (create / update / unchanged, with line-diff counts) without writing a thing, and `withUndo: true` to make the write **reversible** — it returns an `undo` object you hand to `eds_da_rollback` to restore prior content and remove any docs the push created. Preview before writing, undo after: the difference between an impressive demo and something you'd point at a production site.
 >
 > `EDS_DA_TOKEN` is an Adobe IMS access token for Document Authoring — grab it from an authenticated [da.live](https://da.live) session (the IMS `access_token`). Document paths assume `.html` when no extension is given (`index` → `index.html`).
+
+### Content audit — find what's wrong, before you fix it
+
+- `eds_audit_page`
+- `eds_audit_site`
+
+> **It tells you what's wrong.** `eds_audit_site` sweeps the whole site (or a subtree) and returns a **prioritized** list of issues across **SEO** (missing titles/descriptions, no H1, blocked from indexing), **accessibility** (images without alt text, missing landmarks, unlabeled form inputs), **freshness** (pages not updated in over a year), **sitemap coverage**, and — with a `domain` — **performance** (Core Web Vitals) and **404s** from Adobe's own real-user data. `eds_audit_page` does the same for one page. Read-only and safe to run anytime. Pair it with the `eds_da_*` write tools (dry-run + undo) to fix what it finds.
 
 ---
 
