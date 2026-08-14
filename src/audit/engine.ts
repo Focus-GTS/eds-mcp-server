@@ -72,6 +72,17 @@ function preview(paths: string[], n = 10): string {
   return paths.length > n ? `${shown}, …` : shown;
 }
 
+/** Normalize a path for cross-source comparison: decode + drop a trailing slash. */
+function normPath(p: string): string {
+  let s = p;
+  try {
+    s = decodeURIComponent(p);
+  } catch {
+    /* malformed encoding — compare as-is */
+  }
+  return s.length > 1 && s.endsWith('/') ? s.slice(0, -1) : s;
+}
+
 /** Pages not updated in over a year (query-index `lastModified`, unix seconds). */
 function freshnessFindings(entries: EdsQueryIndexEntry[], now: number): AuditFinding[] {
   const stale = entries.filter(
@@ -108,13 +119,13 @@ function sitemapFindings(
   const sitemapPaths = new Set(
     sitemap.map((s) => {
       try {
-        return new URL(s.loc).pathname;
+        return normPath(new URL(s.loc).pathname);
       } catch {
-        return s.loc;
+        return normPath(s.loc);
       }
     }),
   );
-  const missing = entries.map((e) => e.path).filter((p) => !sitemapPaths.has(p));
+  const missing = entries.map((e) => e.path).filter((p) => !sitemapPaths.has(normPath(p)));
   if (missing.length === 0) return [];
   return [
     {
@@ -227,9 +238,25 @@ export async function auditSite(
   const findings: AuditFinding[] = [];
   const skipped: string[] = [];
 
-  // 1. Page index (query-index). One fetch, generous cap.
-  const index = await client.listPages(1000, 0);
-  let entries = index.data;
+  // 1. Page index (query-index) — paginate so site-level checks (freshness,
+  //    sitemap coverage) see every page, not just the first response.
+  const HARD_CAP = 5000;
+  const allEntries: EdsQueryIndexEntry[] = [];
+  let offset = 0;
+  let indexTotal: number;
+  for (;;) {
+    const page = await client.listPages(500, offset);
+    indexTotal = typeof page.total === 'number' ? page.total : allEntries.length + page.data.length;
+    allEntries.push(...page.data);
+    offset += page.data.length;
+    if (page.data.length === 0 || allEntries.length >= indexTotal || allEntries.length >= HARD_CAP) break;
+  }
+  if (indexTotal > allEntries.length) {
+    skipped.push(
+      `index truncated (scanned first ${allEntries.length} of ${indexTotal} pages — freshness/sitemap coverage reflect only those)`,
+    );
+  }
+  let entries = allEntries;
   if (options.pathPrefix) {
     entries = entries.filter((e) => e.path.startsWith(options.pathPrefix!));
   }
@@ -243,7 +270,7 @@ export async function auditSite(
       toAudit,
       async (entry) => {
         try {
-          const { html } = await client.getPageContent(entry.path);
+          const { html } = await client.getRenderedPage(entry.path);
           if (dims.has('seo')) {
             for (const f of seoFindings(html)) findings.push({ ...f, page: entry.path });
           }

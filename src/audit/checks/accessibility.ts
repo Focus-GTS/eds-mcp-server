@@ -89,13 +89,20 @@ function checkLinkText(html: string): AuditFinding | null {
 
 function checkAriaLandmarks(html: string): AuditFinding | null {
   const hasMain = /<main[\s>]/i.test(html) || /role=["']main["']/i.test(html);
-  const hasNav = /<nav[\s>]/i.test(html) || /role=["']navigation["']/i.test(html);
+  // <header>/banner counts as the top landmark: EDS loads <nav> into the header
+  // client-side, so requiring a literal <nav> in the served HTML would
+  // false-positive on every EDS site.
+  const hasNav =
+    /<nav[\s>]/i.test(html) ||
+    /role=["']navigation["']/i.test(html) ||
+    /<header[\s>]/i.test(html) ||
+    /role=["']banner["']/i.test(html);
   const hasFooter = /<footer[\s>]/i.test(html) || /role=["']contentinfo["']/i.test(html);
   const found = [hasMain, hasNav, hasFooter].filter(Boolean).length;
   if (found === 3) return null;
   const missing: string[] = [];
   if (!hasMain) missing.push('main');
-  if (!hasNav) missing.push('nav');
+  if (!hasNav) missing.push('header/nav');
   if (!hasFooter) missing.push('footer');
   return {
     dimension: 'accessibility',
@@ -137,7 +144,10 @@ function checkFormLabels(html: string): AuditFinding | null {
     const id = control.match(/\bid=["']([^"']*)["']/i)?.[1];
     let hasAssociatedLabel = false;
     if (id) {
-      hasAssociatedLabel = new RegExp(`<label\\s[^>]*for=["']${id}["']`, 'i').test(html);
+      // Escape regex metacharacters — ids like "a[0]" would otherwise mis-match
+      // or throw (and throwing would drop the whole page to a fetch "failure").
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      hasAssociatedLabel = new RegExp(`<label\\s[^>]*for=["']${escaped}["']`, 'i').test(html);
     }
     if (!hasAriaLabel && !hasAriaLabelledBy && !hasTitle && !hasAssociatedLabel) unlabeled++;
   }

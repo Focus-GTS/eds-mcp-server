@@ -37,10 +37,13 @@ function checkTitle(html: string): AuditFinding | null {
 }
 
 function checkMetaDescription(html: string): AuditFinding | null {
+  // Match the closing quote to the opening one (backreference) so a description
+  // containing an apostrophe isn't truncated at the first ' — a very common
+  // false positive with `content="what's new …"`.
   const m =
-    html.match(/<meta\s+name=["']description["']\s+content=["']([\s\S]*?)["'][^>]*>/i) ??
-    html.match(/<meta\s+content=["']([\s\S]*?)["']\s+name=["']description["'][^>]*>/i);
-  const description = m?.[1]?.trim() ?? '';
+    html.match(/<meta\s+name=["']description["']\s+content=(["'])([\s\S]*?)\1[^>]*>/i) ??
+    html.match(/<meta\s+content=(["'])([\s\S]*?)\1\s+name=["']description["'][^>]*>/i);
+  const description = m?.[2]?.trim() ?? '';
   if (!description) {
     return {
       dimension: 'seo',
@@ -87,13 +90,16 @@ function checkRobots(html: string): AuditFinding | null {
     html.match(/<meta\s+name=["']robots["']\s+content=["']([^"']*)["'][^>]*>/i) ??
     html.match(/<meta\s+content=["']([^"']*)["']\s+name=["']robots["'][^>]*>/i);
   const content = m?.[1]?.toLowerCase() ?? '';
-  if (content.includes('noindex') || content.includes('nofollow')) {
+  // Only `noindex` (or `none`, which implies noindex) blocks indexing.
+  // `nofollow` controls link-following, NOT indexing — do not report it as
+  // "blocked from search indexing" (a factually wrong, embarrassing claim).
+  if (content.includes('noindex') || content.includes('none')) {
     return {
       dimension: 'seo',
       severity: 'critical',
       title: 'Page is blocked from search indexing',
       detail: `A robots meta directive is blocking indexing: "${content}".`,
-      suggestion: 'Remove noindex/nofollow if this page should appear in search results.',
+      suggestion: 'Remove noindex/none if this page should appear in search results.',
     };
   }
   return null;

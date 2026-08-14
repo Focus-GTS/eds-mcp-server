@@ -74,7 +74,7 @@ export async function handleAuditPage(
   args: { path: string },
 ) {
   try {
-    const { html } = await client.getPageContent(args.path);
+    const { html } = await client.getRenderedPage(args.path);
     return textResult(formatReport(auditSinglePage(html, args.path)));
   } catch (error) {
     return errorResult(error);

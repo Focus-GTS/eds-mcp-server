@@ -85,6 +85,20 @@ describe('seoFindings', () => {
     expect(findings.find((x) => x.title.includes('structured data'))?.severity).toBe('info');
     expect(findings.find((x) => x.title === 'No Open Graph tags')?.severity).toBe('warning');
   });
+
+  it('does not truncate a description containing an apostrophe', () => {
+    // Good-length (135 char) description with an apostrophe — must NOT be flagged.
+    const desc = `It's ${'x'.repeat(130)}`;
+    const html = `<html><head><meta name="description" content="${desc}"></head><body></body></html>`;
+    expect(seoFindings(html).find((x) => x.title.includes('Meta description'))).toBeUndefined();
+  });
+
+  it('flags noindex but NOT nofollow as blocked-from-indexing', () => {
+    const noindex = '<html><head><meta name="robots" content="noindex"></head><body></body></html>';
+    expect(seoFindings(noindex).some((x) => x.title.includes('blocked from search'))).toBe(true);
+    const nofollow = '<html><head><meta name="robots" content="nofollow"></head><body></body></html>';
+    expect(seoFindings(nofollow).some((x) => x.title.includes('blocked from search'))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -169,7 +183,7 @@ function fakeClient(over: Partial<Record<string, unknown>> = {}): EdsClient {
         { path: '/b', title: '', description: '', image: '', lastModified: NOW_S },
       ],
     }),
-    getPageContent: async (path: string) => ({ path, html: path === '/a' ? BAD : CLEAN }),
+    getRenderedPage: async (path: string) => ({ path, html: path === '/a' ? BAD : CLEAN }),
     getSitemap: async () => [{ loc: 'https://example.com/a' }], // /b missing
     getCwv: async () => [{ url: '/a', lcp: 5000, cls: 0.3, inp: 400, ttfb: 100, pageViews: 50 }],
     get404s: async () => [{ url: '/gone', views: 12, sources: [] }],
@@ -217,13 +231,26 @@ describe('auditSite', () => {
 
   it('records a page that fails to fetch instead of aborting', async () => {
     const client = fakeClient({
-      getPageContent: async (path: string) => {
+      getRenderedPage: async (path: string) => {
         if (path === '/a') throw new Error('boom');
         return { path, html: CLEAN };
       },
     });
     const report = await auditSite(client, { dimensions: ['seo', 'accessibility'] });
     expect(report.findings.some((f) => f.title === 'Page could not be fetched' && f.page === '/a')).toBe(true);
+  });
+
+  it('matches sitemap coverage despite trailing slashes', async () => {
+    const client = fakeClient({
+      listPages: async () => ({
+        total: 1, offset: 0, limit: 1000,
+        data: [{ path: '/a', title: '', description: '', image: '', lastModified: NOW_S }],
+      }),
+      getSitemap: async () => [{ loc: 'https://example.com/a/' }], // trailing slash vs index "/a"
+    });
+    const report = await auditSite(client, { dimensions: ['sitemap'] });
+    // /a is covered by the sitemap (once slashes are normalized) -> no finding.
+    expect(report.findings.filter((f) => f.dimension === 'sitemap')).toEqual([]);
   });
 
   it('respects a pathPrefix filter', async () => {
@@ -241,14 +268,14 @@ describe('auditSite', () => {
 
 describe('audit handlers', () => {
   it('handleAuditPage formats a readable report', async () => {
-    const client = { getPageContent: async () => ({ path: '/bad', html: BAD }) } as unknown as EdsClient;
+    const client = { getRenderedPage: async () => ({ path: '/bad', html: BAD }) } as unknown as EdsClient;
     const res = await handleAuditPage(client, { path: '/bad' });
     expect(res.content[0].text).toContain('Audit of page /bad');
     expect(res.content[0].text).toContain('CRITICAL');
   });
 
   it('handleAuditPage surfaces a fetch error via isError', async () => {
-    const client = { getPageContent: async () => { throw new Error('nope'); } } as unknown as EdsClient;
+    const client = { getRenderedPage: async () => { throw new Error('nope'); } } as unknown as EdsClient;
     const res = await handleAuditPage(client, { path: '/x' });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain('Error:');
