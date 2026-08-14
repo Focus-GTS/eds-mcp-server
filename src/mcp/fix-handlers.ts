@@ -113,6 +113,19 @@ export async function handleBulkFixMetadata(
   },
 ) {
   try {
+    // Dedupe input by DA-normalized path (case-sensitive; strip a leading "/"
+    // and a trailing ".html"), MERGING metadata so two entries for the same page
+    // combine rather than racing each other on write (which would produce a
+    // nondeterministic result and a broken undo).
+    const deduped = new Map<string, { path: string; metadata: MetadataFields }>();
+    for (const p of args.pages) {
+      const key = p.path.replace(/^\/+/, '').replace(/\.html$/i, '');
+      const existing = deduped.get(key);
+      if (existing) existing.metadata = { ...existing.metadata, ...p.metadata };
+      else deduped.set(key, { path: p.path, metadata: { ...p.metadata } });
+    }
+    const pages = [...deduped.values()];
+
     // 1. Read + transform each page (bounded concurrency). Collect only the
     //    pages that actually change; record read failures without aborting.
     const plans: Array<{
@@ -124,7 +137,7 @@ export async function handleBulkFixMetadata(
     }> = [];
     const readFailed: Array<{ path: string; error: string }> = [];
     await mapWithConcurrency(
-      args.pages,
+      pages,
       async (p) => {
         try {
           const source = await daClient.getSource(p.path);
@@ -138,7 +151,7 @@ export async function handleBulkFixMetadata(
       },
       6,
     );
-    const unchanged = args.pages.length - plans.length - readFailed.length;
+    const unchanged = pages.length - plans.length - readFailed.length;
 
     // 2. Dry run: full plan, no writes.
     if (args.dryRun) {
@@ -157,9 +170,18 @@ export async function handleBulkFixMetadata(
     }
 
     if (plans.length === 0) {
-      return textResult(
-        `No changes needed — ${unchanged} page(s) already correct${readFailed.length ? `, ${readFailed.length} unreadable` : ''}.`,
-      );
+      // Lead with the failure when nothing could be read (e.g. bad token) so it
+      // doesn't read as a success.
+      if (readFailed.length > 0) {
+        const lines = [
+          `Nothing written — ${readFailed.length} page(s) could not be read; ${unchanged} already correct.`,
+          '',
+          'Could not read:',
+        ];
+        for (const f of readFailed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+        return textResult(lines.join('\n'));
+      }
+      return textResult(`No changes needed — ${unchanged} page(s) already correct.`);
     }
 
     // 3. Push ALL changed pages in ONE batch → a single aggregated undo.
@@ -195,12 +217,28 @@ export async function handleBulkFixMetadata(
       lines.push('(Written to DA. Pass publish:true to make the batch live.)');
     }
 
+    if (readFailed.length > 0) {
+      lines.push('', 'Could not read:');
+      for (const f of readFailed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+    }
     if (result.failed.length > 0) {
       lines.push('', 'Write failures:');
       for (const f of result.failed) lines.push(`  ✗ ${f.path} — ${f.error}`);
     }
-    if (result.undo) {
-      lines.push('', 'To undo this ENTIRE batch in one call, use eds_da_rollback with:', JSON.stringify({ undo: result.undo }));
+    // Return the aggregated undo — but never inline a giant blob. A large batch's
+    // undo carries every page's full prior HTML; past a size cap, inlining it is
+    // unusable, so advise smaller batches (DA versioning is the per-page fallback).
+    if (result.undo && (result.undo.restore.length > 0 || result.undo.remove.length > 0)) {
+      const undoJson = JSON.stringify({ undo: result.undo });
+      const UNDO_INLINE_CAP = 200_000;
+      if (undoJson.length <= UNDO_INLINE_CAP) {
+        lines.push('', 'To undo this ENTIRE batch in one call, use eds_da_rollback with:', undoJson);
+      } else {
+        lines.push(
+          '',
+          `(This batch's undo is ${Math.round(undoJson.length / 1024)} KB — too large to return inline. For a single returnable undo, run smaller batches; DA also versions every page, so any page can be reverted from its version history.)`,
+        );
+      }
     }
     return textResult(lines.join('\n'));
   } catch (error) {
