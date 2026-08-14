@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 30 tools registered.
+ * Creates a {@link McpServer} instance with all 31 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -470,7 +470,7 @@ export function createServer(options: EdsClientOptions): McpServer {
 
   server.tool(
     'eds_da_push',
-    'Bulk-push many edited Document Authoring documents back in one call. The "push" half of the bulk workflow — write a whole batch of {path, content} at once. Returns per-document succeeded/failed. Requires EDS_DA_TOKEN.',
+    'Bulk-push many edited Document Authoring documents back in one call. Set dryRun to PREVIEW what would change (create/update/unchanged) without writing anything — safest to run this first. Set withUndo to make the write reversible (returns an undo object for eds_da_rollback). Requires EDS_DA_TOKEN.',
     {
       documents: z
         .array(
@@ -483,8 +483,38 @@ export function createServer(options: EdsClientOptions): McpServer {
         .min(1)
         .max(1000)
         .describe('The documents to write back'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('Preview the changes without writing anything (recommended first pass)'),
+      withUndo: z
+        .boolean()
+        .optional()
+        .describe('Capture prior state so the push can be reverted with eds_da_rollback'),
     },
     async (args) => daHandlers.handleDaPush(daClient, args),
+  );
+
+  server.tool(
+    'eds_da_rollback',
+    'Undo a previous eds_da_push. Pass the exact `undo` object returned by a push that used withUndo — it restores overwritten documents and deletes newly-created ones. Requires EDS_DA_TOKEN.',
+    {
+      undo: z
+        .object({
+          restore: z
+            .array(
+              z.object({
+                path: daSourcePath.describe('Prior document path'),
+                content: z.string(),
+                contentType: z.string().optional(),
+              }),
+            )
+            .describe('Prior document contents to re-write'),
+          remove: z.array(daSourcePath).describe('Paths the push created, to delete'),
+        })
+        .describe('The undo object returned by a withUndo push'),
+    },
+    async (args) => daHandlers.handleDaRollback(daClient, args),
   );
 
   return server;

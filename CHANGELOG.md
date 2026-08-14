@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Safe writes — dry-run preview and rollback** (ADR-009). Makes bulk writes
+  safe by default, the trust differentiator for pointing the server at a
+  production site:
+  - `eds_da_push` gains `dryRun` — read the current remote state for each path
+    and return a plan (`N create, M update, K unchanged`, with per-document
+    line-diff counts) **without writing anything**. Always safe to run first.
+  - `eds_da_push` gains `withUndo` — capture each affected document's prior
+    state before overwriting and return an `undo` object (prior content of
+    updated docs + paths of newly-created docs).
+  - `eds_da_rollback` (new tool) — take that `undo` object and reverse the push:
+    restore updated docs to their prior content and delete the docs the push
+    created. Partial-failure tolerant; reports what was restored/removed.
+  Builds on DA's native per-write versioning (each write is already snapshotted,
+  tagged `x-da-initiator: mcp`). 31 tools total.
+
 ## [0.6.0] - 2026-08-13
 
 ### Added

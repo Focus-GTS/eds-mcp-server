@@ -17,6 +17,9 @@ import type {
   DaDocument,
   DaExportResult,
   DaPushResult,
+  DaPushPreview,
+  DaPushPlanEntry,
+  DaUndo,
 } from './types.js';
 import { EdsApiError } from '../utils/errors.js';
 
@@ -27,6 +30,22 @@ export const NEEDS_DA_TOKEN_MESSAGE =
 /** Sleep for `ms` milliseconds. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Count added/removed lines between two versions (multiset line difference). */
+function lineChanges(oldContent: string, newContent: string): { added: number; removed: number } {
+  const tally = (text: string): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const line of text.split('\n')) m.set(line, (m.get(line) ?? 0) + 1);
+    return m;
+  };
+  const oldT = tally(oldContent);
+  const newT = tally(newContent);
+  let added = 0;
+  let removed = 0;
+  for (const [line, n] of newT) added += Math.max(0, n - (oldT.get(line) ?? 0));
+  for (const [line, n] of oldT) removed += Math.max(0, n - (newT.get(line) ?? 0));
+  return { added, removed };
 }
 
 export class DaClient {
@@ -292,24 +311,110 @@ export class DaClient {
    */
   async pushDocuments(
     documents: DaDocument[],
-    options: { concurrency?: number } = {},
+    options: { concurrency?: number; withUndo?: boolean } = {},
   ): Promise<DaPushResult> {
     const concurrency = options.concurrency ?? 6;
     const succeeded: string[] = [];
     const failed: Array<{ path: string; error: string }> = [];
+    const restore: DaDocument[] = [];
+    const remove: string[] = [];
     await this.mapWithConcurrency(
       documents,
       async (doc) => {
         try {
+          // Read prior state first (needed for the undo entry and to skip no-op
+          // writes), but only RECORD the undo entry AFTER the write succeeds.
+          // Recording before the write would let a failed write leave a phantom
+          // undo entry — e.g. a `remove` for a doc that was never created, which
+          // rollback would then delete: the safety feature causing data loss.
+          let prior: DaSourceContent | null = null;
+          if (options.withUndo) {
+            prior = await this.getSourceOrNull(doc.path);
+            // Already in the desired state: don't write a spurious version, and
+            // there's nothing to undo. Mirrors previewPush's `unchanged`.
+            if (prior && prior.content === doc.content) {
+              succeeded.push(doc.path);
+              return;
+            }
+          }
           await this.putSource(doc.path, doc.content, doc.contentType);
           succeeded.push(doc.path);
+          if (options.withUndo) {
+            if (prior) restore.push(prior);
+            else remove.push(this.docPath(doc.path));
+          }
         } catch (error) {
           failed.push({ path: doc.path, error: error instanceof Error ? error.message : String(error) });
         }
       },
       concurrency,
     );
-    return { succeeded, failed };
+    const result: DaPushResult = { succeeded, failed };
+    if (options.withUndo) result.undo = { restore, remove };
+    return result;
+  }
+
+  /**
+   * Preview a push without writing: classify each document as create / update /
+   * unchanged (with line-change counts for updates). Read-only, so always safe.
+   */
+  async previewPush(documents: DaDocument[]): Promise<DaPushPreview> {
+    const plan: DaPushPlanEntry[] = [];
+    await this.mapWithConcurrency(
+      documents,
+      async (doc) => {
+        const prior = await this.getSourceOrNull(doc.path);
+        if (prior === null) {
+          plan.push({ path: this.docPath(doc.path), action: 'create' });
+        } else if (prior.content === doc.content) {
+          plan.push({ path: prior.path, action: 'unchanged' });
+        } else {
+          plan.push({ path: prior.path, action: 'update', changes: lineChanges(prior.content, doc.content) });
+        }
+      },
+      6,
+    );
+    const summary = { create: 0, update: 0, unchanged: 0 };
+    for (const e of plan) summary[e.action] += 1;
+    return { plan, summary };
+  }
+
+  /**
+   * Undo a push: re-write the prior content of updated docs and delete the docs
+   * the push created. Takes the `undo` object returned by a `withUndo` push.
+   */
+  async rollback(undo: DaUndo): Promise<DaPushResult> {
+    const restored = await this.pushDocuments(undo.restore);
+    const removed: string[] = [];
+    const failed = [...restored.failed];
+    await this.mapWithConcurrency(
+      undo.remove,
+      async (path) => {
+        try {
+          await this.deleteSource(path);
+          removed.push(this.docPath(path));
+        } catch (error) {
+          failed.push({ path, error: error instanceof Error ? error.message : String(error) });
+        }
+      },
+      6,
+    );
+    return { succeeded: [...restored.succeeded, ...removed], failed };
+  }
+
+  /** Get a document's source, or null if it does not exist (404). */
+  private async getSourceOrNull(path: string): Promise<DaSourceContent | null> {
+    try {
+      return await this.getSource(path);
+    } catch (error) {
+      if (error instanceof EdsApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** The site-relative document path a write would target (with .html applied). */
+  private docPath(path: string): string {
+    return `/${this.normalizeDocPath(path)}`;
   }
 
   /** Run `fn` over `items` with at most `concurrency` in flight at once. */

@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 30 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 31 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 30 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 31 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -120,9 +120,12 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_da_move_source` | Move/rename a DA document |
 | `eds_da_get_versions` | Get a DA document's version history |
 | `eds_da_export` | Bulk-export a whole DA subtree in one call (agent-native "clone" read) |
-| `eds_da_push` | Bulk-push many edited DA documents in one call |
+| `eds_da_push` | Bulk-push many edited DA documents in one call (supports `dryRun` preview and `withUndo` reversible writes) |
+| `eds_da_rollback` | Undo a `withUndo` push — restore prior content and remove created docs |
 
 DA tools (`eds_da_*`) access the authored source directly via `admin.da.live` (adopted from `adobe-rnd/da-mcp`, per ADR-007). `eds_da_export`/`eds_da_push` are the bulk "clone" model (ADR-008) — the efficiency of `aem content clone` for agents, no local checkout. They require `EDS_DA_TOKEN`; DA client code lives in `src/da-admin/`.
+
+**Safe writes (ADR-009).** `eds_da_push` is safe by default: pass `dryRun: true` to preview exactly what would change (create / update / unchanged, with line-diff counts) and write nothing, or `withUndo: true` to capture the prior state and get back an `undo` object. Feed that object to `eds_da_rollback` to reverse the push — restoring updated docs to their prior content and deleting the ones the push created. This is what makes pointing the server at a production site trustworthy: preview before writing, undo after.
 
 ## Conventions
 

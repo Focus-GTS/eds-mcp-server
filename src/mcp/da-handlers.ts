@@ -151,10 +151,32 @@ export async function handleDaExport(
 
 export async function handleDaPush(
   client: DaClient,
-  args: { documents: Array<{ path: string; content: string; contentType?: string }> },
+  args: {
+    documents: Array<{ path: string; content: string; contentType?: string }>;
+    dryRun?: boolean;
+    withUndo?: boolean;
+  },
 ) {
   try {
-    const result = await client.pushDocuments(args.documents);
+    // Dry-run: preview what would change, write nothing.
+    if (args.dryRun) {
+      const preview = await client.previewPush(args.documents);
+      const s = preview.summary;
+      const lines = [
+        `Dry run — nothing was written. ${s.create} create, ${s.update} update, ${s.unchanged} unchanged.`,
+        '',
+      ];
+      for (const e of preview.plan) {
+        const detail =
+          e.action === 'update' && e.changes
+            ? ` (+${e.changes.added}/-${e.changes.removed} lines)`
+            : '';
+        lines.push(`  ${e.action.toUpperCase().padEnd(9)} ${e.path}${detail}`);
+      }
+      return textResult(lines.join('\n'));
+    }
+
+    const result = await client.pushDocuments(args.documents, { withUndo: args.withUndo });
     const lines = [
       `Pushed ${result.succeeded.length} document${result.succeeded.length === 1 ? '' : 's'}; ${result.failed.length} failed.`,
     ];
@@ -162,6 +184,32 @@ export async function handleDaPush(
       lines.push('', 'Succeeded:');
       for (const p of result.succeeded) lines.push(`  ✓ ${p}`);
     }
+    if (result.failed.length > 0) {
+      lines.push('', 'Failed:');
+      for (const f of result.failed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+    }
+    if (result.undo) {
+      lines.push(
+        '',
+        'To undo this push, call eds_da_rollback with this exact object:',
+        JSON.stringify({ undo: result.undo }),
+      );
+    }
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handleDaRollback(
+  client: DaClient,
+  args: { undo: { restore: Array<{ path: string; content: string; contentType?: string }>; remove: string[] } },
+) {
+  try {
+    const result = await client.rollback(args.undo);
+    const lines = [
+      `Rolled back: ${result.succeeded.length} restored/removed; ${result.failed.length} failed.`,
+    ];
     if (result.failed.length > 0) {
       lines.push('', 'Failed:');
       for (const f of result.failed) lines.push(`  ✗ ${f.path} — ${f.error}`);
