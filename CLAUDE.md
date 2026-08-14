@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 31 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 33 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 31 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 33 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -122,10 +122,14 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_da_export` | Bulk-export a whole DA subtree in one call (agent-native "clone" read) |
 | `eds_da_push` | Bulk-push many edited DA documents in one call (supports `dryRun` preview and `withUndo` reversible writes) |
 | `eds_da_rollback` | Undo a `withUndo` push — restore prior content and remove created docs |
+| `eds_audit_page` | Audit one page for SEO + accessibility issues (prioritized findings) |
+| `eds_audit_site` | Sweep the site for SEO, accessibility, freshness, sitemap, performance (RUM) + 404 issues |
 
 DA tools (`eds_da_*`) access the authored source directly via `admin.da.live` (adopted from `adobe-rnd/da-mcp`, per ADR-007). `eds_da_export`/`eds_da_push` are the bulk "clone" model (ADR-008) — the efficiency of `aem content clone` for agents, no local checkout. They require `EDS_DA_TOKEN`; DA client code lives in `src/da-admin/`.
 
 **Safe writes (ADR-009).** `eds_da_push` is safe by default: pass `dryRun: true` to preview exactly what would change (create / update / unchanged, with line-diff counts) and write nothing, or `withUndo: true` to capture the prior state and get back an `undo` object. Feed that object to `eds_da_rollback` to reverse the push — restoring updated docs to their prior content and deleting the ones the push created. This is what makes pointing the server at a production site trustworthy: preview before writing, undo after.
+
+**Content audit (ADR-010).** `eds_audit_page` and `eds_audit_site` are read-only "what's wrong" tools. They run regex-based SEO + accessibility checks on page HTML (ported from the eds-score scorers), plus site-level freshness (query-index `lastModified`), sitemap coverage, and — when a `domain` is passed (needs `EDS_DOMAIN_KEY`) — RUM performance (Core Web Vitals) and 404s. Output is a prioritized `AuditFinding` list (severity + dimension + suggested fix); RUM dimensions skip loudly (listed in `skipped`) when no domain/key, never silently. No Google PageSpeed dependency. Audit code lives in `src/audit/`. Pairs with the safe-writes tools to fix what it finds.
 
 ## Conventions
 

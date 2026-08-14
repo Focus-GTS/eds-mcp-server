@@ -467,6 +467,26 @@ export class EdsClient {
   }
 
   /**
+   * Fetch the FULL rendered page HTML (with `<head>`), not the `.plain.html`
+   * body fragment. This is what SEO/metadata analysis needs — title, meta
+   * description, canonical, Open Graph, JSON-LD and `<html lang>` all live in
+   * the head, which `.plain.html` omits.
+   *
+   * GET https://{ref}--{repo}--{owner}.aem.live/{path}
+   */
+  async getRenderedPage(path: string): Promise<EdsPageContent> {
+    const normalized = this.normalizePath(path)
+      .replace(/\.plain\.html$/, '')
+      .replace(/\.html$/, '');
+    const url = `${this.contentOrigin}/${normalized}`;
+    const html = await this.request<string>(url, { method: 'GET' });
+    return {
+      path: `/${normalized}`,
+      html: typeof html === 'string' ? html : String(html),
+    };
+  }
+
+  /**
    * List pages from the query index.
    *
    * GET https://{ref}--{repo}--{owner}.aem.live/query-index.json?limit=N&offset=N
