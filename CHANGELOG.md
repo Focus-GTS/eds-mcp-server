@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Safe fixes — repair what the audit finds** (ADR-011). The "Executor" the
+  ops-agent ADRs envisioned, now buildable on top of safe writes:
+  - `eds_fix_metadata` — add/update a page's title, meta description, and Open
+    Graph image by editing its Document Authoring **Metadata block**. Idempotent
+    (merges into an existing block, never duplicates; preserves untouched rows),
+    routed through the ADR-009 safe-writes path (`dryRun` preview + `withUndo` →
+    `eds_da_rollback`). Optional `publish:true` previews+publishes so the change
+    goes live. The agent supplies the content; the tool writes it correctly and
+    reversibly. Block format grounded in Adobe's own `helix-html-pipeline`
+    (`extract-metadata.js`). 34 tools total.
+
+### Changed
+- `login()` gains a configurable `timeoutMs` (the hardcoded 120s browser-callback
+  window was too tight for interactive sign-in).
+
 ## [0.8.0] - 2026-08-14
 
 ### Added
