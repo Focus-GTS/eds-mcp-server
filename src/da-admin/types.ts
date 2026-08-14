@@ -93,4 +93,36 @@ export interface DaPushResult {
   succeeded: string[];
   /** Paths that failed, with the error message. */
   failed: Array<{ path: string; error: string }>;
+  /**
+   * Present when the push was made with `withUndo`. The reverse operation:
+   * `restore` re-writes the prior content of updated docs, `remove` deletes
+   * the docs this push newly created. Pass it to `eds_da_rollback` to undo.
+   */
+  undo?: DaUndo;
+}
+
+/** One document's status in a dry-run push preview. */
+export interface DaPushPlanEntry {
+  /** Site-relative document path. */
+  path: string;
+  /** What the push would do to it. */
+  action: 'create' | 'update' | 'unchanged';
+  /** For updates: line-level change counts (added/removed). */
+  changes?: { added: number; removed: number };
+}
+
+/** Result of a dry-run push preview (no writes performed). */
+export interface DaPushPreview {
+  /** Per-document plan. */
+  plan: DaPushPlanEntry[];
+  /** Roll-up counts. */
+  summary: { create: number; update: number; unchanged: number };
+}
+
+/** The reverse of a push, used to undo it. */
+export interface DaUndo {
+  /** Prior content to re-write (undoes updates). */
+  restore: DaDocument[];
+  /** Paths the push created, to delete (undoes creates). */
+  remove: string[];
 }

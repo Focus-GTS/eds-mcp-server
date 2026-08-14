@@ -10,6 +10,7 @@ import {
   handleDaGetVersions,
   handleDaExport,
   handleDaPush,
+  handleDaRollback,
 } from '../src/mcp/da-handlers.js';
 
 function jsonRes(status: number, body: unknown, headers: Record<string, string> = {}) {
@@ -377,5 +378,196 @@ describe('DA handlers', () => {
     const result = await handleDaGetSource(new DaClient({ org: 'o', repo: 'r' }), { path: 'index' });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('EDS_DA_TOKEN');
+  });
+});
+
+describe('DA safe writes (dry-run preview + rollback)', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Route by method+URL so we can distinguish the GET (read prior state) from the
+  // PUT/DELETE (the write) that a safe-write cycle makes against the same path.
+  function methodRouter(map: Record<string, () => ReturnType<typeof jsonRes>>) {
+    return vi.fn((url: unknown, init?: { method?: string }) => {
+      const key = `${(init?.method ?? 'GET').toUpperCase()} ${String(url)}`;
+      const make = map[key];
+      if (make) return Promise.resolve(make());
+      return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found', headers: new Headers(), text: () => Promise.resolve('') });
+    });
+  }
+
+  it('previewPush classifies create / update / unchanged with line counts, writing nothing', async () => {
+    const fetchMock = methodRouter({
+      // exists, different content → update (+1 line: <p>b</p> added, <p>a</p> removed)
+      'GET https://admin.da.live/source/o/r/edit.html': () => textRes(200, '<p>a</p>'),
+      // exists, identical content → unchanged
+      'GET https://admin.da.live/source/o/r/same.html': () => textRes(200, '<p>same</p>'),
+      // 'new.html' GET falls through to 404 default → create
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const preview = await new DaClient(opts).previewPush([
+      { path: 'edit', content: '<p>b</p>' },
+      { path: 'same', content: '<p>same</p>' },
+      { path: 'new', content: '<p>new</p>' },
+    ]);
+    expect(preview.summary).toEqual({ create: 1, update: 1, unchanged: 1 });
+    const byAction = Object.fromEntries(preview.plan.map((e) => [e.action, e]));
+    expect(byAction.create.path).toBe('/new.html');
+    expect(byAction.unchanged.path).toBe('/same.html');
+    expect(byAction.update).toMatchObject({ path: '/edit.html', changes: { added: 1, removed: 1 } });
+    // Read-only: no PUT/DELETE was issued.
+    const writes = fetchMock.mock.calls.filter((c) => ['POST', 'DELETE'].includes((c[1]?.method ?? 'GET').toUpperCase()));
+    expect(writes).toHaveLength(0);
+  });
+
+  it('pushDocuments withUndo captures prior state (restore for updates, remove for creates)', async () => {
+    const fetchMock = methodRouter({
+      'GET https://admin.da.live/source/o/r/edit.html': () => textRes(200, '<p>old</p>'),
+      // 'new.html' GET → 404 (create)
+      'POST https://admin.da.live/source/o/r/edit.html': () => jsonRes(200, {}),
+      'POST https://admin.da.live/source/o/r/new.html': () => jsonRes(200, {}),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new DaClient(opts).pushDocuments(
+      [
+        { path: 'edit', content: '<p>new content</p>' },
+        { path: 'new', content: '<p>fresh</p>' },
+      ],
+      { withUndo: true },
+    );
+    expect(result.succeeded.sort()).toEqual(['edit', 'new']);
+    expect(result.undo).toBeDefined();
+    expect(result.undo?.restore).toEqual([{ path: '/edit.html', content: '<p>old</p>', contentType: 'text/html' }]);
+    expect(result.undo?.remove).toEqual(['/new.html']);
+  });
+
+  it('rollback restores updated docs and deletes created docs', async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn((url: unknown, init?: { method?: string }) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      calls.push(`${method} ${String(url)}`);
+      return Promise.resolve(jsonRes(200, {}));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new DaClient(opts).rollback({
+      restore: [{ path: '/edit.html', content: '<p>old</p>', contentType: 'text/html' }],
+      remove: ['/new.html'],
+    });
+    expect(result.failed).toEqual([]);
+    expect(result.succeeded).toEqual(['/edit.html', '/new.html']);
+    expect(calls).toContain('POST https://admin.da.live/source/o/r/edit.html'); // restored prior content
+    expect(calls).toContain('DELETE https://admin.da.live/source/o/r/new.html'); // deleted the created doc
+  });
+
+  it('a full preview → push withUndo → rollback cycle restores the EXACT prior content', async () => {
+    // Mutable in-memory store that persists the ACTUAL written bytes, so a
+    // faithful restore is genuinely verifiable end-to-end (not a marker).
+    const store = new Map<string, string>([['edit.html', '<p>original</p>']]);
+    const fetchMock = vi.fn(async (url: unknown, init?: { method?: string; body?: unknown }) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const file = String(url).replace('https://admin.da.live/source/o/r/', '');
+      if (method === 'GET') {
+        return store.has(file) ? textRes(200, store.get(file)!) : { ok: false, status: 404, statusText: 'NF', headers: new Headers(), text: () => Promise.resolve('') };
+      }
+      if (method === 'POST') {
+        const data = (init?.body as FormData | undefined)?.get('data');
+        store.set(file, data instanceof Blob ? await data.text() : String(data ?? ''));
+        return jsonRes(200, {});
+      }
+      if (method === 'DELETE') { store.delete(file); return jsonRes(200, {}); }
+      return jsonRes(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new DaClient(opts);
+    const docs = [
+      { path: 'edit', content: '<p>changed</p>' },
+      { path: 'new', content: '<p>brand new</p>' },
+    ];
+    const preview = await client.previewPush(docs);
+    expect(preview.summary).toEqual({ create: 1, update: 1, unchanged: 0 });
+    const push = await client.pushDocuments(docs, { withUndo: true });
+    expect(store.get('edit.html')).toBe('<p>changed</p>'); // update applied live
+    expect(store.get('new.html')).toBe('<p>brand new</p>'); // create applied live
+    // Roll back using the undo object EXACTLY as returned — no hand-editing.
+    await client.rollback(push.undo!);
+    expect(store.get('edit.html')).toBe('<p>original</p>'); // faithfully restored
+    expect(store.has('new.html')).toBe(false); // created doc removed
+  });
+
+  it('withUndo: a FAILED write is never recorded in undo (no phantom rollback target)', async () => {
+    // The create's write fails (403). Its path must NOT land in undo.remove —
+    // else a later rollback would delete a doc this push never created.
+    const fetchMock = methodRouter({
+      // GET new.html → 404 default (create); its POST fails:
+      'POST https://admin.da.live/source/o/r/new.html': () => ({ ok: false, status: 403, statusText: 'Forbidden', headers: new Headers(), text: () => Promise.resolve('') }) as ReturnType<typeof jsonRes>,
+      // a sibling update that DOES succeed, to prove good entries are still captured:
+      'GET https://admin.da.live/source/o/r/edit.html': () => textRes(200, '<p>old</p>'),
+      'POST https://admin.da.live/source/o/r/edit.html': () => jsonRes(200, {}),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new DaClient(opts).pushDocuments(
+      [{ path: 'new', content: '<p>n</p>' }, { path: 'edit', content: '<p>changed</p>' }],
+      { withUndo: true },
+    );
+    expect(result.failed.map((f) => f.path)).toEqual(['new']);
+    expect(result.succeeded).toEqual(['edit']);
+    expect(result.undo?.remove).toEqual([]); // the failed create is NOT a rollback target
+    expect(result.undo?.restore).toEqual([{ path: '/edit.html', content: '<p>old</p>', contentType: 'text/html' }]);
+  });
+
+  it('withUndo: an unchanged doc is skipped — no write, no undo entry', async () => {
+    const fetchMock = methodRouter({
+      'GET https://admin.da.live/source/o/r/same.html': () => textRes(200, '<p>same</p>'),
+      // POST same.html intentionally unmapped → would 404 if a write were attempted.
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new DaClient(opts).pushDocuments(
+      [{ path: 'same', content: '<p>same</p>' }],
+      { withUndo: true },
+    );
+    expect(result.succeeded).toEqual(['same']); // already in desired state
+    expect(result.failed).toEqual([]);
+    expect(result.undo?.restore).toEqual([]);
+    expect(result.undo?.remove).toEqual([]);
+    const writes = fetchMock.mock.calls.filter((c) => (c[1]?.method ?? 'GET').toUpperCase() === 'POST');
+    expect(writes).toHaveLength(0); // no spurious version written
+  });
+
+  it('handleDaPush dryRun previews without writing and formats the plan', async () => {
+    const fetchMock = vi.fn((url: unknown, init?: { method?: string }) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method !== 'GET') throw new Error('dry run must not write');
+      return Promise.resolve(String(url).includes('edit') ? textRes(200, '<p>a</p>') : { ok: false, status: 404, statusText: 'NF', headers: new Headers(), text: () => Promise.resolve('') });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await handleDaPush(new DaClient(opts), {
+      documents: [{ path: 'edit', content: '<p>b</p>' }, { path: 'new', content: '<p>n</p>' }],
+      dryRun: true,
+    });
+    expect(result.content[0].text).toContain('Dry run — nothing was written');
+    expect(result.content[0].text).toContain('1 create, 1 update');
+    expect(result.content[0].text).toMatch(/CREATE\s+\/new\.html/);
+    expect(result.content[0].text).toMatch(/UPDATE\s+\/edit\.html/);
+  });
+
+  it('handleDaPush withUndo appends the undo object for eds_da_rollback', async () => {
+    vi.stubGlobal('fetch', methodRouter({
+      'POST https://admin.da.live/source/o/r/new.html': () => jsonRes(200, {}),
+      // GET new.html → 404 (create → remove list)
+    }));
+    const result = await handleDaPush(new DaClient(opts), {
+      documents: [{ path: 'new', content: '<p>n</p>' }],
+      withUndo: true,
+    });
+    expect(result.content[0].text).toContain('eds_da_rollback');
+    expect(result.content[0].text).toContain('"remove":["/new.html"]');
+  });
+
+  it('handleDaRollback reports what was restored/removed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, {})));
+    const result = await handleDaRollback(new DaClient(opts), {
+      undo: { restore: [{ path: '/edit.html', content: '<p>old</p>' }], remove: ['/new.html'] },
+    });
+    expect(result.content[0].text).toContain('Rolled back: 2 restored/removed; 0 failed');
   });
 });
