@@ -112,19 +112,20 @@ describe('accessibilityFindings', () => {
 
   it('flags a majority of images missing alt text as critical', () => {
     const html = '<html lang="en"><body><img src="a"><img src="b"><img src="c" alt="ok"></body></html>';
-    const f = accessibilityFindings(html).find((x) => x.title === 'Images missing alt text');
+    const f = accessibilityFindings(html).find((x) => x.title === 'Images missing an alt attribute');
     expect(f?.severity).toBe('critical'); // 2 of 3 missing -> ratio > 0.5
     expect(f?.detail).toContain('2 of 3');
   });
 
   it('does not flag decorative images with role=presentation', () => {
     const html = '<html lang="en"><main></main><nav></nav><footer></footer><img src="a" role="presentation"></html>';
-    expect(accessibilityFindings(html).find((x) => x.title === 'Images missing alt text')).toBeUndefined();
+    expect(accessibilityFindings(html).find((x) => x.title === 'Images missing an alt attribute')).toBeUndefined();
   });
 
-  it('flags a missing lang attribute as critical', () => {
+  it('does NOT flag a missing lang attribute (EDS applies it client-side)', () => {
+    // Every EDS page serves bare <html>; flagging it would false-positive on all.
     const f = accessibilityFindings('<html><body></body></html>').find((x) => x.title === 'No language attribute');
-    expect(f?.severity).toBe('critical');
+    expect(f).toBeUndefined();
   });
 
   it('flags an unlabeled form input', () => {

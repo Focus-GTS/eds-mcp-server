@@ -15,9 +15,12 @@ function checkImageAltText(html: string): AuditFinding | null {
 
   let missing = 0;
   for (const img of images) {
-    const alt = img.match(/\balt=["']([^"']*)["']/i);
-    if (!alt || alt[1].trim() === '') {
-      // A truly decorative image may legitimately have empty alt.
+    // Only a TRULY absent alt attribute is a WCAG failure (screen readers then
+    // announce the file name). `alt=""` is the spec-correct decorative marker —
+    // valid, not a violation — and EDS emits it whenever an author leaves alt
+    // blank, so treating it as "missing" would false-positive across EDS sites.
+    const hasAltAttr = /\balt\s*=/i.test(img);
+    if (!hasAltAttr) {
       const decorative =
         /role=["']presentation["']/i.test(img) || /aria-hidden=["']true["']/i.test(img);
       if (!decorative) missing++;
@@ -28,11 +31,11 @@ function checkImageAltText(html: string): AuditFinding | null {
   const ratio = missing / images.length;
   return {
     dimension: 'accessibility',
-    // A majority of images lacking alt text is a real barrier; a few is a warning.
+    // A majority of images with no alt attribute is a real barrier; a few is a warning.
     severity: ratio > 0.5 ? 'critical' : 'warning',
-    title: 'Images missing alt text',
-    detail: `${missing} of ${images.length} images have no alt text.`,
-    suggestion: 'Add descriptive alt text (or alt="" + role="presentation" for decorative images).',
+    title: 'Images missing an alt attribute',
+    detail: `${missing} of ${images.length} images have no alt attribute at all.`,
+    suggestion: 'Add alt text (or alt="" for genuinely decorative images).',
   };
 }
 
@@ -113,16 +116,11 @@ function checkAriaLandmarks(html: string): AuditFinding | null {
   };
 }
 
-function checkLanguageAttribute(html: string): AuditFinding | null {
-  if (/<html\s[^>]*lang=["'][^"']+["']/i.test(html)) return null;
-  return {
-    dimension: 'accessibility',
-    severity: 'critical',
-    title: 'No language attribute',
-    detail: 'The <html> element has no lang attribute.',
-    suggestion: 'Add lang="en" (or the appropriate language) to <html>.',
-  };
-}
+// NOTE: there is deliberately no `<html lang>` check. Edge Delivery Services
+// applies `document.documentElement.lang` client-side (from metadata) — every
+// EDS page, including Adobe's own www.aem.live, serves bare `<html>` at the
+// origin. Auditing the served HTML for lang would false-positive a "critical"
+// on 100% of pages of every EDS site, which is wrong and misleading.
 
 function checkFormLabels(html: string): AuditFinding | null {
   const re = /<(?:input|select|textarea)\s[^>]*>/gi;
@@ -170,7 +168,6 @@ export function accessibilityFindings(html: string): AuditFinding[] {
     checkHeadingHierarchy(html),
     checkLinkText(html),
     checkAriaLandmarks(html),
-    checkLanguageAttribute(html),
     checkFormLabels(html),
   ].filter((f): f is AuditFinding => f !== null);
 }

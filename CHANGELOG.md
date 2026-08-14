@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layer that returns a prioritized, actionable findings list:
   - `eds_audit_page` — SEO + accessibility checks on a single page's HTML
     (missing/short title & description, no/duplicate H1, noindex, missing
-    canonical/OG/JSON-LD; images without alt text, heading-level skips, missing
-    landmarks, missing `lang`, unlabeled form inputs).
+    canonical/OG/JSON-LD; images with no alt attribute, heading-level skips,
+    missing landmarks, non-descriptive link text, unlabeled form inputs).
+    Checks are EDS-aware — e.g. `alt=""` (valid decorative markup) and the
+    client-side `<html lang>` are not false-flagged.
   - `eds_audit_site` — bulk sweep (bounded concurrency, `maxPages` cap) running
     the per-page checks across the page index plus site-level checks: freshness
     (query-index `lastModified`), sitemap coverage, and — when a `domain` is
