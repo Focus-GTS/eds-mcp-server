@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-14
+
 ### Added
 - **Safe writes — dry-run preview and rollback** (ADR-009). Makes bulk writes
   safe by default, the trust differentiator for pointing the server at a
