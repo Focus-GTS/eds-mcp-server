@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-14
+
 ### Added
 - **Content audit — find what's wrong** (ADR-010). A read-only quality-audit
   layer that returns a prioritized, actionable findings list:
