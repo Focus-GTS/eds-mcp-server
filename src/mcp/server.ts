@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 34 tools registered.
+ * Creates a {@link McpServer} instance with all 35 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -608,6 +608,39 @@ export function createServer(options: EdsClientOptions): McpServer {
         withUndo: args.withUndo,
         publish: args.publish,
       });
+    },
+  );
+
+  server.tool(
+    'eds_bulk_fix_metadata',
+    'Fix SEO/social metadata across MANY pages in one reversible operation. Takes a list of { path, metadata } (the agent supplies each page\'s values after auditing). Writes all changed pages in a single batch and returns ONE undo object that reverts the entire batch via eds_da_rollback. dryRun previews the whole plan; publish:true previews+publishes the batch live. Requires EDS_DA_TOKEN. Pair with eds_audit_site to fix a site\'s findings at once.',
+    {
+      pages: z
+        .array(
+          z.object({
+            path: edsPath.describe('Site-relative page path'),
+            metadata: z
+              .object({
+                title: z.string().optional(),
+                description: z.string().optional(),
+                image: z.string().optional(),
+                imageAlt: z.string().optional(),
+              })
+              .describe('Metadata fields to set on this page (only provided ones change)'),
+          }),
+        )
+        .min(1)
+        .max(500)
+        .describe('The pages to fix, each with its own metadata values'),
+      dryRun: z.boolean().optional().describe('Preview the whole plan without writing (recommended first pass)'),
+      publish: z.boolean().optional().describe('Preview + publish the changed pages so the batch goes live'),
+    },
+    async (args) => {
+      const pages = args.pages.map((p) => {
+        const { imageAlt, ...rest } = p.metadata;
+        return { path: p.path, metadata: { ...rest, ...(imageAlt !== undefined ? { 'image-alt': imageAlt } : {}) } };
+      });
+      return fixHandlers.handleBulkFixMetadata(daClient, client, { pages, dryRun: args.dryRun, publish: args.publish });
     },
   );
 

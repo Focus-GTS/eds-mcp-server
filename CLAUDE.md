@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 34 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 35 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 34 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 35 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -125,10 +125,13 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_audit_page` | Audit one page for SEO + accessibility issues (prioritized findings) |
 | `eds_audit_site` | Sweep the site for SEO, accessibility, freshness, sitemap, performance (RUM) + 404 issues |
 | `eds_fix_metadata` | Fix a page's title/description/OG image via its DA Metadata block (dry-run + undo, optional publish) |
+| `eds_bulk_fix_metadata` | Fix metadata across many pages in one batch with a single aggregated undo (dry-run + optional publish) |
 
 DA tools (`eds_da_*`) access the authored source directly via `admin.da.live` (adopted from `adobe-rnd/da-mcp`, per ADR-007). `eds_da_export`/`eds_da_push` are the bulk "clone" model (ADR-008) — the efficiency of `aem content clone` for agents, no local checkout. They require `EDS_DA_TOKEN`; DA client code lives in `src/da-admin/`.
 
 **Safe writes (ADR-009).** `eds_da_push` is safe by default: pass `dryRun: true` to preview exactly what would change (create / update / unchanged, with line-diff counts) and write nothing, or `withUndo: true` to capture the prior state and get back an `undo` object. Feed that object to `eds_da_rollback` to reverse the push — restoring updated docs to their prior content and deleting the ones the push created. This is what makes pointing the server at a production site trustworthy: preview before writing, undo after.
+
+**Bulk fixes (ADR-012).** `eds_bulk_fix_metadata` applies per-page metadata fixes across many pages (`pages: [{path, metadata}]`) in one call: reuses the ADR-011 writer, pushes all changed pages in a single `eds_da_push withUndo` so the result carries **one** undo that reverts the whole batch, with optional `publish` (bounded-concurrency preview+publish). Partial-failure tolerant (unreadable pages recorded, never abort). Handler in `src/mcp/fix-handlers.ts`.
 
 **Safe fixes (ADR-011).** `eds_fix_metadata` repairs a page's SEO/social metadata (title, description, OG image) by editing its DA-source **Metadata block** (`<div class="metadata">` — format grounded in `helix-html-pipeline` `extract-metadata.js`), routed through the ADR-009 safe-writes path (dry-run + `withUndo` → `eds_da_rollback`). Idempotent: merges into an existing block, never duplicates, preserves untouched rows. `publish:true` previews+publishes so the change goes live (a DA write alone isn't live until republished). The agent supplies the values; the tool is a deterministic safe-writer. Fix code lives in `src/fix/`. This is the "Executor" the ops-agent ADRs (002/003/006) envisioned.
 

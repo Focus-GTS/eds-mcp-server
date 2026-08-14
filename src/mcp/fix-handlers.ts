@@ -23,6 +23,23 @@ function errorResult(error: unknown) {
   };
 }
 
+/** Run `fn` over `items` with at most `concurrency` in flight at once. */
+async function mapWithConcurrency<T>(
+  items: T[],
+  fn: (item: T) => Promise<void>,
+  concurrency: number,
+): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i]);
+    }
+  };
+  const size = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: size }, () => worker()));
+}
+
 export async function handleFixMetadata(
   daClient: DaClient,
   edsClient: EdsClient,
@@ -79,6 +96,111 @@ export async function handleFixMetadata(
 
     if (result.undo) {
       lines.push('', 'To undo this change, call eds_da_rollback with:', JSON.stringify({ undo: result.undo }));
+    }
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handleBulkFixMetadata(
+  daClient: DaClient,
+  edsClient: EdsClient,
+  args: {
+    pages: Array<{ path: string; metadata: MetadataFields }>;
+    dryRun?: boolean;
+    publish?: boolean;
+  },
+) {
+  try {
+    // 1. Read + transform each page (bounded concurrency). Collect only the
+    //    pages that actually change; record read failures without aborting.
+    const plans: Array<{
+      path: string;
+      sourcePath: string;
+      contentType?: string;
+      html: string;
+      fields: string[];
+    }> = [];
+    const readFailed: Array<{ path: string; error: string }> = [];
+    await mapWithConcurrency(
+      args.pages,
+      async (p) => {
+        try {
+          const source = await daClient.getSource(p.path);
+          const { html, changes } = applyMetadata(source.content, p.metadata);
+          if (changes.length > 0) {
+            plans.push({ path: p.path, sourcePath: source.path, contentType: source.contentType, html, fields: changes.map((c) => c.field) });
+          }
+        } catch (e) {
+          readFailed.push({ path: p.path, error: e instanceof Error ? e.message : String(e) });
+        }
+      },
+      6,
+    );
+    const unchanged = args.pages.length - plans.length - readFailed.length;
+
+    // 2. Dry run: full plan, no writes.
+    if (args.dryRun) {
+      const lines = [
+        `Dry run — nothing written. ${plans.length} page(s) would change, ${unchanged} already correct, ${readFailed.length} unreadable.`,
+      ];
+      if (plans.length > 0) {
+        lines.push('', 'Would change:');
+        for (const pl of plans) lines.push(`  ${pl.sourcePath}: ${pl.fields.join(', ')}`);
+      }
+      if (readFailed.length > 0) {
+        lines.push('', 'Could not read:');
+        for (const f of readFailed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+      }
+      return textResult(lines.join('\n'));
+    }
+
+    if (plans.length === 0) {
+      return textResult(
+        `No changes needed — ${unchanged} page(s) already correct${readFailed.length ? `, ${readFailed.length} unreadable` : ''}.`,
+      );
+    }
+
+    // 3. Push ALL changed pages in ONE batch → a single aggregated undo.
+    const result = await daClient.pushDocuments(
+      plans.map((pl) => ({ path: pl.sourcePath, content: pl.html, contentType: pl.contentType })),
+      { withUndo: true },
+    );
+
+    const lines = [
+      `Fixed ${result.succeeded.length} page(s) in one batch; ${result.failed.length} write failure(s); ${unchanged} already correct; ${readFailed.length} unreadable.`,
+    ];
+
+    // 4. Optionally publish the pages that were written.
+    if (args.publish && result.succeeded.length > 0) {
+      const written = new Set(result.succeeded);
+      const toPublish = plans.filter((pl) => written.has(pl.sourcePath)).map((pl) => pl.path);
+      let published = 0;
+      const pubFailed: string[] = [];
+      await mapWithConcurrency(
+        toPublish,
+        async (path) => {
+          try {
+            await edsClient.previewAndPublish(path);
+            published++;
+          } catch {
+            pubFailed.push(path);
+          }
+        },
+        6,
+      );
+      lines.push(`Published ${published}/${toPublish.length} page(s) live${pubFailed.length ? ` (${pubFailed.length} publish failure(s))` : ''}.`);
+    } else if (result.succeeded.length > 0) {
+      lines.push('(Written to DA. Pass publish:true to make the batch live.)');
+    }
+
+    if (result.failed.length > 0) {
+      lines.push('', 'Write failures:');
+      for (const f of result.failed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+    }
+    if (result.undo) {
+      lines.push('', 'To undo this ENTIRE batch in one call, use eds_da_rollback with:', JSON.stringify({ undo: result.undo }));
     }
     return textResult(lines.join('\n'));
   } catch (error) {
