@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 31 tools registered.
+ * Creates a {@link McpServer} instance with all 33 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -17,6 +17,8 @@ import { DaClient } from '../da-admin/client.js';
 import type { EdsClientOptions } from '../eds-admin/types.js';
 import * as handlers from './handlers.js';
 import * as daHandlers from './da-handlers.js';
+import * as auditHandlers from './audit-handlers.js';
+import { ALL_DIMENSIONS } from '../audit/types.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json') as { version: string };
@@ -515,6 +517,54 @@ export function createServer(options: EdsClientOptions): McpServer {
         .describe('The undo object returned by a withUndo push'),
     },
     async (args) => daHandlers.handleDaRollback(daClient, args),
+  );
+
+  // -------------------------------------------------------------------------
+  // Content audit (ADR-010) — find what's wrong, prioritized and actionable
+  // -------------------------------------------------------------------------
+
+  server.tool(
+    'eds_audit_page',
+    'Audit a single page for SEO and accessibility issues (missing title/description, no H1, images without alt text, missing landmarks, etc.). Returns a prioritized list of findings with suggested fixes. Read-only.',
+    {
+      path: edsPath.describe('Site-relative page path to audit (e.g. /blog/post)'),
+    },
+    async (args) => auditHandlers.handleAuditPage(client, args),
+  );
+
+  server.tool(
+    'eds_audit_site',
+    'Sweep the whole site (or a subtree) and return a prioritized list of content-quality issues across SEO, accessibility, freshness, sitemap coverage, and — when a domain is supplied — performance (Core Web Vitals) and 404s from real-user data. Read-only; safe to run anytime. Pair with the eds_da_* write tools to fix what it finds.',
+    {
+      pathPrefix: z
+        .string()
+        .optional()
+        .describe('Only audit pages under this path prefix (e.g. "/blog/"). Omit for the whole site.'),
+      maxPages: z
+        .number()
+        .int()
+        .positive()
+        .max(1000)
+        .optional()
+        .describe('Max pages to fetch for per-page checks (default 50).'),
+      dimensions: z
+        .array(z.enum(ALL_DIMENSIONS as [string, ...string[]]))
+        .optional()
+        .describe(`Which dimensions to run (default all): ${ALL_DIMENSIONS.join(', ')}.`),
+      domain: z
+        .string()
+        .optional()
+        .describe('Live domain (e.g. www.example.com) for RUM-based performance and 404 checks. Requires EDS_DOMAIN_KEY. Omit to skip those.'),
+      days: z
+        .number()
+        .int()
+        .positive()
+        .max(365)
+        .optional()
+        .describe('RUM look-back window in days (default 7).'),
+    },
+    async (args) =>
+      auditHandlers.handleAuditSite(client, args as Parameters<typeof auditHandlers.handleAuditSite>[1]),
   );
 
   return server;
