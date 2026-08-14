@@ -113,6 +113,54 @@ describe('applyMetadata', () => {
     const { html } = applyMetadata(PAGE, { description: 'A & B <script>' });
     expect(html).toContain('A &amp; B &lt;script&gt;');
   });
+
+  // --- Regression tests for adversarial-review findings ---
+
+  it('preserves an existing <img> Image row when only the description changes (no OG-image loss)', () => {
+    const withImg = `<main>
+      <div class="metadata">
+        <div><div><p>Title</p></div><div><p>Old</p></div></div>
+        <div><div><p>Image</p></div><div><img src="./media_abc.png"></div></div>
+      </div>
+    </main>`;
+    const { html, changes } = applyMetadata(withImg, { description: 'A brand new description of the page.' });
+    expect(changes.map((c) => c.field)).toEqual(['description']);
+    expect(html).toContain('./media_abc.png'); // the image row survived, verbatim
+    expect(html.match(/<div class="metadata">/g)).toHaveLength(1);
+    const rows = parseMetadataRows(findDivBlock(html, 'metadata')!.inner);
+    expect(rows.get('image')).toBe('./media_abc.png');
+    expect(rows.get('title')).toBe('Old');
+  });
+
+  it('matches a metadata block with a variant class / single quotes / attribute order (no duplicate)', () => {
+    for (const open of ['<div class="metadata variant">', "<div class='metadata'>", '<div id="x" class="metadata">']) {
+      const html = `<main>${open}<div><div><p>Title</p></div><div><p>Old</p></div></div></div></main>`;
+      const { html: out, changes } = applyMetadata(html, { description: 'D' });
+      expect(changes).toHaveLength(1);
+      // Exactly one metadata block — the existing one was updated in place.
+      expect(out.match(/class=["'][^"']*\bmetadata\b/g)).toHaveLength(1);
+      expect(out).toContain('Description');
+    }
+  });
+
+  it('does not match a lookalike class like "metadata-foo"', () => {
+    expect(findDivBlock('<div class="metadata-foo"><div>x</div></div>', 'metadata')).toBeNull();
+  });
+
+  it('image-alt round-trips and is idempotent (no duplicate rows)', () => {
+    const first = applyMetadata(PAGE, { 'image-alt': 'A descriptive hero image' });
+    const second = applyMetadata(first.html, { 'image-alt': 'A descriptive hero image' });
+    expect(second.changes).toEqual([]);
+    expect(second.html).toBe(first.html);
+    expect(first.html.match(/Image Alt/g)).toHaveLength(1);
+  });
+
+  it('writes the image field as an <img> (what the pipeline reads) and is idempotent', () => {
+    const { html } = applyMetadata(PAGE, { image: 'https://example.com/og.png' });
+    expect(html).toContain('<img src="https://example.com/og.png">');
+    const again = applyMetadata(html, { image: 'https://example.com/og.png' });
+    expect(again.changes).toEqual([]); // src compared, not stripped text
+  });
 });
 
 // ---------------------------------------------------------------------------
