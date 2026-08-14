@@ -23,6 +23,8 @@ export interface LoginOptions {
   repo: string;
   /** Git ref / branch. Defaults to "main" when omitted. */
   ref?: string;
+  /** How long to wait for the browser callback, in ms. Defaults to 120000. */
+  timeoutMs?: number;
 }
 
 /** Result of a successful login. */
@@ -108,6 +110,7 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
   const owner = options.owner;
   const repo = options.repo;
   const ref = options.ref ?? 'main';
+  const timeoutMs = options.timeoutMs ?? LOGIN_TIMEOUT_MS;
   const state = generateNonce();
 
   return new Promise<LoginResult>((resolve, reject) => {
@@ -256,7 +259,7 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
       openBrowser(loginUrl);
 
       process.stderr.write(
-        `\nWaiting for sign-in to complete (timeout ${LOGIN_TIMEOUT_MS / 1000}s)...\n` +
+        `\nWaiting for sign-in to complete (timeout ${timeoutMs / 1000}s)...\n` +
           'Use Google Chrome or Firefox to sign in (Safari blocks the local callback). ' +
           "If it doesn't complete, set EDS_API_KEY instead — see the README.\n",
       );
@@ -265,13 +268,13 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
         settle(() =>
           reject(
             new Error(
-              `Login timed out after ${LOGIN_TIMEOUT_MS / 1000}s — no callback was received. ` +
+              `Login timed out after ${timeoutMs / 1000}s — no callback was received. ` +
                 'Safari is not supported (it blocks the local callback) — use Google Chrome or Firefox. ' +
                 'Alternatively, set EDS_API_KEY instead of signing in — see the README.',
             ),
           ),
         );
-      }, LOGIN_TIMEOUT_MS);
+      }, timeoutMs);
       timeout.unref();
     });
   });

@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 33 tools registered.
+ * Creates a {@link McpServer} instance with all 34 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -18,6 +18,7 @@ import type { EdsClientOptions } from '../eds-admin/types.js';
 import * as handlers from './handlers.js';
 import * as daHandlers from './da-handlers.js';
 import * as auditHandlers from './audit-handlers.js';
+import * as fixHandlers from './fix-handlers.js';
 import { ALL_DIMENSIONS } from '../audit/types.js';
 
 const require = createRequire(import.meta.url);
@@ -565,6 +566,49 @@ export function createServer(options: EdsClientOptions): McpServer {
     },
     async (args) =>
       auditHandlers.handleAuditSite(client, args as Parameters<typeof auditHandlers.handleAuditSite>[1]),
+  );
+
+  // -------------------------------------------------------------------------
+  // Safe fixes (ADR-011) — repair audit findings through the safe-writes layer
+  // -------------------------------------------------------------------------
+
+  server.tool(
+    'eds_fix_metadata',
+    'Fix a page\'s SEO/social metadata (title, description, Open Graph image) by editing its Document Authoring source. Adds or updates the page\'s Metadata block idempotently, through the safe-writes path (dry-run + undo). The AGENT supplies the values (e.g. write a good meta description); this tool writes them correctly and reversibly. Requires EDS_DA_TOKEN. Set publish:true to preview+publish so the change goes live.',
+    {
+      path: edsPath.describe('Site-relative page path to fix (e.g. /blog/post)'),
+      metadata: z
+        .object({
+          title: z.string().optional().describe('Page title (aim for 30–60 characters)'),
+          description: z.string().optional().describe('Meta description (aim for 120–160 characters)'),
+          image: z.string().optional().describe('Open Graph / social share image URL'),
+          imageAlt: z.string().optional().describe('Alt text for the social image'),
+        })
+        .describe('Metadata fields to set (only the ones provided are changed)'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('Preview the before/after without writing (recommended first pass)'),
+      withUndo: z
+        .boolean()
+        .optional()
+        .describe('Make the write reversible — returns an undo object for eds_da_rollback'),
+      publish: z
+        .boolean()
+        .optional()
+        .describe('Preview + publish the page after writing so the change goes live'),
+    },
+    async (args) => {
+      const { imageAlt, ...rest } = args.metadata;
+      const metadata = { ...rest, ...(imageAlt !== undefined ? { 'image-alt': imageAlt } : {}) };
+      return fixHandlers.handleFixMetadata(daClient, client, {
+        path: args.path,
+        metadata,
+        dryRun: args.dryRun,
+        withUndo: args.withUndo,
+        publish: args.publish,
+      });
+    },
   );
 
   return server;
