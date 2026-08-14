@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-14
+
 ### Added
 - **Safe fixes — repair what the audit finds** (ADR-011). The "Executor" the
   ops-agent ADRs envisioned, now buildable on top of safe writes:
