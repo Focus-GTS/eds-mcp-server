@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-14
+
 ### Added
 - **Bulk safe fixes** (ADR-012). `eds_bulk_fix_metadata` — fix SEO/social metadata
   across many pages in one reversible operation. Takes `pages: [{ path, metadata }]`
