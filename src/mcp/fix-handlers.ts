@@ -267,15 +267,17 @@ export async function handleFixRedirect(
   },
 ) {
   try {
-    const existing = await getSourceOrNull(daClient, '/redirects');
+    // The redirects sheet is a JSON document at /redirects.json (an EDS sheet —
+    // NOT an HTML table, which would become a block).
+    const existing = await getSourceOrNull(daClient, '/redirects.json');
 
     let applied;
     try {
       applied = applyRedirects(existing?.content ?? null, args.redirects);
     } catch (e) {
-      return errorResult(e); // e.g. an existing sheet without Source/Destination columns
+      return errorResult(e); // e.g. an unrecognizable / multi-sheet existing doc
     }
-    const { html, changes } = applied;
+    const { content, changes } = applied;
 
     if (changes.length === 0) {
       return textResult('No redirect changes needed — every rule is already in the sheet.');
@@ -293,23 +295,23 @@ export async function handleFixRedirect(
     // Always capture undo — a bad redirect hides a live page, so this write must
     // always be reversible.
     const push = await daClient.pushDocuments(
-      [{ path: '/redirects', content: html, contentType: existing?.contentType ?? 'text/html' }],
+      [{ path: '/redirects.json', content, contentType: 'application/json' }],
       { withUndo: true },
     );
     if (push.failed.length > 0) {
-      return errorResult(new Error(`Failed to write /redirects: ${push.failed[0].error}`));
+      return errorResult(new Error(`Failed to write /redirects.json: ${push.failed[0].error}`));
     }
 
     const lines = [`${existing ? 'Updated' : 'Created'} the redirects sheet — ${changes.length} rule(s).`];
     if (args.publish) {
       try {
-        await edsClient.previewAndPublish('/redirects');
+        await edsClient.previewAndPublish('/redirects.json');
         lines.push('Previewed + published — the redirects are live.');
       } catch (e) {
-        lines.push(`(Written to DA, but publish failed: ${formatError(e)} — publish /redirects manually.)`);
+        lines.push(`(Written to DA, but publish failed: ${formatError(e)} — publish /redirects.json manually.)`);
       }
     } else {
-      lines.push('(Written to DA. Pass publish:true, or publish /redirects, to make them live.)');
+      lines.push('(Written to DA. Pass publish:true, or publish /redirects.json, to make them live.)');
     }
     if (push.undo) {
       lines.push('', 'To undo, call eds_da_rollback with:', JSON.stringify({ undo: push.undo }));
