@@ -1,6 +1,6 @@
 {
   "name": "@focusgts/eds-mcp-server",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "mcpName": "io.github.focusgts/eds-mcp-server",
   "description": "MCP server for Adobe Edge Delivery Services — preview, publish, metrics, and content operations",
   "license": "Apache-2.0",
