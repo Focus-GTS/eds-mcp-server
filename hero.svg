@@ -20,6 +20,7 @@
       <line x1="892" y1="180" x2="1010" y2="120"/>
       <line x1="892" y1="180" x2="1010" y2="180"/>
       <line x1="892" y1="180" x2="1010" y2="240"/>
+      <line x1="892" y1="180" x2="1010" y2="300"/>
     </g>
     <rect x="792" y="156" width="100" height="48" rx="9" fill="#101c36" stroke="#3d5891" stroke-width="1.5"/>
     <text x="842" y="185" text-anchor="middle" font-size="14" fill="#cdd9f0" font-weight="600">AI agent</text>
@@ -27,42 +28,48 @@
       <rect x="1010" y="98" width="150" height="44" rx="9"/>
       <rect x="1010" y="158" width="150" height="44" rx="9"/>
       <rect x="1010" y="218" width="150" height="44" rx="9"/>
+      <rect x="1010" y="278" width="150" height="44" rx="9"/>
     </g>
     <g font-size="13" fill="#9fb1d6">
       <text x="1085" y="125" text-anchor="middle">Admin API</text>
       <text x="1085" y="185" text-anchor="middle">Content API</text>
-      <text x="1085" y="245" text-anchor="middle">RUM / OpTel</text>
+      <text x="1085" y="245" text-anchor="middle">Doc Authoring</text>
+      <text x="1085" y="305" text-anchor="middle">RUM / OpTel</text>
     </g>
     <circle cx="892" cy="180" r="4" fill="#ff6a60"/>
     <!-- animated data pulses agent -> APIs -->
     <circle r="4.5" fill="#7fd1ff">
-      <animateMotion dur="2.1s" repeatCount="indefinite" path="M892,180 L1010,120"/>
-      <animate attributeName="opacity" values="0;1;1;0" dur="2.1s" repeatCount="indefinite"/>
+      <animateMotion dur="2.4s" repeatCount="indefinite" path="M892,180 L1010,120"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" repeatCount="indefinite"/>
     </circle>
     <circle r="4.5" fill="#7fd1ff">
-      <animateMotion dur="2.1s" begin="0.7s" repeatCount="indefinite" path="M892,180 L1010,180"/>
-      <animate attributeName="opacity" values="0;1;1;0" dur="2.1s" begin="0.7s" repeatCount="indefinite"/>
+      <animateMotion dur="2.4s" begin="0.6s" repeatCount="indefinite" path="M892,180 L1010,180"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="0.6s" repeatCount="indefinite"/>
     </circle>
     <circle r="4.5" fill="#7fd1ff">
-      <animateMotion dur="2.1s" begin="1.4s" repeatCount="indefinite" path="M892,180 L1010,240"/>
-      <animate attributeName="opacity" values="0;1;1;0" dur="2.1s" begin="1.4s" repeatCount="indefinite"/>
+      <animateMotion dur="2.4s" begin="1.2s" repeatCount="indefinite" path="M892,180 L1010,240"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="1.2s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="4.5" fill="#7fd1ff">
+      <animateMotion dur="2.4s" begin="1.8s" repeatCount="indefinite" path="M892,180 L1010,300"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" begin="1.8s" repeatCount="indefinite"/>
     </circle>
   </g>
 
   <!-- wordmark -->
   <text x="64" y="120" font-family="Helvetica, Arial, sans-serif" font-size="60" font-weight="700" letter-spacing="1" fill="#ffffff">EDS MCP Server</text>
-  <text x="66" y="166" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#cdd9f0">Drive Adobe Edge Delivery Services from any AI agent</text>
-  <text x="66" y="200" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#7f90b4">Preview &#183; publish &#183; bulk ops &#183; content &#183; Core Web Vitals &#183; config</text>
+  <text x="66" y="166" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#cdd9f0">Run and improve your Edge Delivery site</text>
+  <text x="66" y="200" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#7f90b4">Read &#183; audit &#183; fix &#183; publish &#183; undo &#8212; from any AI agent</text>
 
   <!-- stat chips -->
   <g font-family="Helvetica, Arial, sans-serif">
     <rect x="64" y="248" width="150" height="60" rx="10" fill="#101c36" stroke="#273a63" stroke-width="1.5"/>
-    <text x="139" y="278" text-anchor="middle" font-size="26" fill="#ffffff" font-weight="700">20</text>
+    <text x="139" y="278" text-anchor="middle" font-size="26" fill="#ffffff" font-weight="700">36</text>
     <text x="139" y="298" text-anchor="middle" font-size="12" fill="#7f90b4">tools</text>
 
     <rect x="226" y="248" width="210" height="60" rx="10" fill="#101c36" stroke="#273a63" stroke-width="1.5"/>
-    <text x="331" y="276" text-anchor="middle" font-size="19" fill="#ffffff" font-weight="700">No extra</text>
-    <text x="331" y="297" text-anchor="middle" font-size="14" fill="#cdd9f0">dependencies</text>
+    <text x="331" y="276" text-anchor="middle" font-size="19" fill="#ffffff" font-weight="700">Safe by default</text>
+    <text x="331" y="297" text-anchor="middle" font-size="14" fill="#cdd9f0">preview &#183; undo</text>
 
     <rect x="448" y="248" width="250" height="60" rx="10" fill="#161208" stroke="#5a4a14" stroke-width="1.5"/>
     <text x="573" y="276" text-anchor="middle" font-size="15" fill="#f2c94c" font-weight="700">in the official MCP registry</text>

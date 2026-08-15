@@ -2,7 +2,7 @@
   "name": "@focusgts/eds-mcp-server",
   "version": "0.11.0",
   "mcpName": "io.github.focusgts/eds-mcp-server",
-  "description": "MCP server for Adobe Edge Delivery Services — preview, publish, metrics, and content operations",
+  "description": "The MCP server for Adobe Edge Delivery Services — read, audit, fix, publish and undo your site from any AI agent. 36 tools, safe by default.",
   "license": "Apache-2.0",
   "author": "FocusGTS <dfox@focusgts.com> (https://focusgts.com)",
   "repository": {
@@ -21,7 +21,11 @@
     "helix",
     "model-context-protocol",
     "ai",
-    "content-management"
+    "content-management",
+    "seo",
+    "accessibility",
+    "site-audit",
+    "document-authoring"
   ],
   "type": "module",
   "types": "dist/lib.d.ts",
