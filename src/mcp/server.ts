@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 36 tools registered.
+ * Creates a {@link McpServer} instance with all 37 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -566,6 +566,29 @@ export function createServer(options: EdsClientOptions): McpServer {
     },
     async (args) =>
       auditHandlers.handleAuditSite(client, args as Parameters<typeof auditHandlers.handleAuditSite>[1]),
+  );
+
+  server.tool(
+    'eds_audit_report',
+    'Run a site audit and return a beautiful, self-contained HTML site-health report — per-dimension health scores, a prioritized issue list, and the suggested fixes — ready to save, host, or share. Same options as eds_audit_site. Read-only.',
+    {
+      pathPrefix: z.string().optional().describe('Only audit pages under this path prefix. Omit for the whole site.'),
+      maxPages: z.number().int().positive().max(1000).optional().describe('Max pages to fetch for per-page checks (default 50).'),
+      dimensions: z
+        .array(z.enum(ALL_DIMENSIONS as [string, ...string[]]))
+        .optional()
+        .describe(`Which dimensions to include (default all): ${ALL_DIMENSIONS.join(', ')}.`),
+      domain: z.string().optional().describe('Live domain for RUM-based performance and 404 checks (needs EDS_DOMAIN_KEY). Also used as the report title.'),
+      days: z.number().int().positive().max(365).optional().describe('RUM look-back window in days (default 7).'),
+    },
+    async (args) => {
+      const site = args.domain ?? `${options.owner}/${options.repo}`;
+      return auditHandlers.handleAuditReport(
+        client,
+        site,
+        args as Parameters<typeof auditHandlers.handleAuditReport>[2],
+      );
+    },
   );
 
   // -------------------------------------------------------------------------

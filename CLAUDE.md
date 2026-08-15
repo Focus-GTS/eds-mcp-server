@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 36 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 37 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 36 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 37 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -124,6 +124,7 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_da_rollback` | Undo a `withUndo` push — restore prior content and remove created docs |
 | `eds_audit_page` | Audit one page for SEO + accessibility issues (prioritized findings) |
 | `eds_audit_site` | Sweep the site for SEO, accessibility, freshness, sitemap, performance (RUM) + 404 issues |
+| `eds_audit_report` | Run the site audit and return a beautiful, self-contained, shareable HTML site-health report |
 | `eds_fix_metadata` | Fix a page's title/description/OG image via its DA Metadata block (dry-run + undo, optional publish) |
 | `eds_bulk_fix_metadata` | Fix metadata across many pages in one batch with a single aggregated undo (dry-run + optional publish) |
 | `eds_fix_redirect` | Add/update 301 redirect rules in the site's `redirects` sheet to fix 404s (dry-run + undo, optional publish) |

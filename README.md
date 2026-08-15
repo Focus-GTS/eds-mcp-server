@@ -10,7 +10,7 @@
 
 ### Let an AI agent run — and *improve* — your Adobe Edge Delivery site.
 
-**36 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**37 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 **Read your content → audit it → fix what's wrong → publish → undo any of it.**
@@ -56,7 +56,7 @@ It doesn't just *drive* your site — it **improves** it, safely. Point it at an
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>36 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>37 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -91,7 +91,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 36 tools
+## 🛠️ The 37 tools
 
 ### Edge Delivery Services — publish, content, analytics
 
@@ -172,8 +172,11 @@ Nine tools reach a site's Document Authoring source directly (`admin.da.live`), 
 
 - `eds_audit_page`
 - `eds_audit_site`
+- `eds_audit_report`
 
 > **It tells you what's wrong.** `eds_audit_site` sweeps the whole site (or a subtree) and returns a **prioritized** list of issues across **SEO** (missing titles/descriptions, no H1, blocked from indexing), **accessibility** (images without alt text, missing landmarks, unlabeled form inputs), **freshness** (pages not updated in over a year), **sitemap coverage**, and — with a `domain` — **performance** (Core Web Vitals) and **404s** from Adobe's own real-user data. `eds_audit_page` does the same for one page. Read-only and safe to run anytime.
+>
+> **`eds_audit_report`** turns that audit into a **beautiful, shareable HTML report** — per-dimension health scores, a prioritized issue list, and each suggested fix — self-contained (no external assets), ready to open, host, or send to a stakeholder.
 
 ### Safe fixes — repair what the audit finds
 

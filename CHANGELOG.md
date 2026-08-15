@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Shareable site-health report** (ADR-014). `eds_audit_report` runs the site
+  audit and returns a **self-contained, theme-aware HTML report** (inline
+  CSS/SVG, no external assets, no dependencies): an overall grade, per-dimension
+  health scores (SEO, accessibility, performance, freshness, links, sitemap),
+  and a prioritized issue list — identical findings collapsed across pages —
+  each with its suggested fix. Dimensions that couldn't run are shown as "not
+  run", never a fake score; the health score is derived transparently from the
+  findings. Same options as `eds_audit_site`. Read-only. 37 tools total.
+
 ## [0.11.0] - 2026-08-15
 
 ### Added
