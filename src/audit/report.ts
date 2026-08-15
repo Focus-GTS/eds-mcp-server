@@ -1,7 +1,8 @@
 /**
  * Site-health report (ADR-014) — render an {@link AuditReport} as a
- * self-contained, theme-aware HTML document (inline CSS, no external assets, no
- * dependencies). The value of the audit, made visible and shareable.
+ * self-contained, theme-aware HTML document (inline CSS + inline SVG gauges, no
+ * external assets, no dependencies). The value of the audit, made visible and
+ * shareable.
  *
  * The health score is derived transparently from the findings (not a fabricated
  * metric) and the report says so; dimensions that could not run are shown as
@@ -44,6 +45,26 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function scoreClass(score: number): string {
+  return score >= 85 ? 'good' : score >= 55 ? 'fair' : 'poor';
+}
+
+/** Inline SVG ring gauge. Colors/type come from CSS classes so it stays theme-aware. */
+function gauge(opts: { size: number; sw: number; score: number; center: string; centerSize: number }): string {
+  const c = opts.size / 2;
+  const r = c - opts.sw / 2 - 1;
+  const circ = 2 * Math.PI * r;
+  const off = circ * (1 - Math.max(0, Math.min(100, opts.score)) / 100);
+  const cls = scoreClass(opts.score);
+  return (
+    `<svg class="gauge" width="${opts.size}" height="${opts.size}" viewBox="0 0 ${opts.size} ${opts.size}" aria-hidden="true">` +
+    `<circle class="track" cx="${c}" cy="${c}" r="${r.toFixed(1)}" stroke-width="${opts.sw}" fill="none"/>` +
+    `<circle class="arc ${cls}" cx="${c}" cy="${c}" r="${r.toFixed(1)}" stroke-width="${opts.sw}" fill="none" stroke-linecap="round" stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 ${c} ${c})"/>` +
+    `<text class="gtext ${cls}" x="${c}" y="${c}" text-anchor="middle" dominant-baseline="central" style="font-size:${opts.centerSize}px">${opts.center}</text>` +
+    `</svg>`
+  );
+}
+
 interface Group {
   dimension: AuditDimension;
   severity: AuditFinding['severity'];
@@ -52,7 +73,6 @@ interface Group {
   pages: string[];
 }
 
-/** Collapse identical findings across pages into one row with the page list. */
 function groupFindings(findings: AuditFinding[]): Group[] {
   const map = new Map<string, Group>();
   for (const f of findings) {
@@ -69,48 +89,77 @@ function groupFindings(findings: AuditFinding[]): Group[] {
   );
 }
 
-function scoreClass(score: number): string {
-  return score >= 85 ? 'good' : score >= 55 ? 'fair' : 'poor';
-}
-
 const STYLE = `
-:root{--bg:#f6f7fb;--card:#fff;--ink:#0f1730;--muted:#5b6689;--line:#e5e8f2;--good:#1f9d5c;--fair:#c98a00;--poor:#d33a2c;--accent:#6E56CF;--crit:#d33a2c;--warn:#c98a00;--info:#4b74d1}
-:root[data-theme="dark"],:root:not([data-theme="light"]){}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1020;--card:#121a30;--ink:#eef1f8;--muted:#9aa6c8;--line:#25304e;--good:#3ec77f;--fair:#e8b23a;--poor:#f26a5c;--accent:#a48bff;--crit:#f26a5c;--warn:#e8b23a;--info:#7fa8ff}}
-:root[data-theme="dark"]{--bg:#0b1020;--card:#121a30;--ink:#eef1f8;--muted:#9aa6c8;--line:#25304e;--good:#3ec77f;--fair:#e8b23a;--poor:#f26a5c;--accent:#a48bff;--crit:#f26a5c;--warn:#e8b23a;--info:#7fa8ff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-.wrap{max-width:960px;margin:0 auto;padding:32px 20px 64px}
-.hero{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 28px 24px;display:flex;gap:24px;align-items:center;flex-wrap:wrap}
-.hero .left{flex:1;min-width:240px}
-.brand{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:700}
-.hero h1{margin:6px 0 4px;font-size:26px;word-break:break-word}
-.hero .meta{color:var(--muted);font-size:13px}
-.ograde{display:flex;flex-direction:column;align-items:center;gap:6px}
-.ring{width:96px;height:96px;border-radius:50%;display:grid;place-items:center;font-size:34px;font-weight:800;color:#fff}
-.ring.good{background:var(--good)}.ring.fair{background:var(--fair)}.ring.poor{background:var(--poor)}
-.ograde .sub{font-size:12px;color:var(--muted)}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin:22px 0}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
-.card .dim{font-size:13px;color:var(--muted);font-weight:600}
-.card .num{font-size:30px;font-weight:800;margin-top:6px;line-height:1}
-.card .num.good{color:var(--good)}.card .num.fair{color:var(--fair)}.card .num.poor{color:var(--poor)}
-.card .g{font-size:12px;color:var(--muted);margin-top:2px}
-.card .issues-n{margin-top:10px;font-size:12px;color:var(--muted)}
-.card.skipped .num{font-size:16px;color:var(--muted);font-weight:600;margin-top:10px}
-h2{font-size:18px;margin:28px 0 12px}
-.issue{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px}
-.issue .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.badge{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;border-radius:999px;color:#fff}
-.badge.critical{background:var(--crit)}.badge.warning{background:var(--warn)}.badge.info{background:var(--info)}
-.chip{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 8px}
-.issue .title{font-weight:600}
-.issue .fix{margin-top:6px;font-size:13px;color:var(--muted)}
-.issue .fix b{color:var(--ink);font-weight:600}
-.issue .pages{margin-top:8px;font-size:12px;color:var(--muted);word-break:break-word}
-.clean{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--good);font-weight:600}
-.note{font-size:12px;color:var(--muted);margin-top:6px}
-footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;text-align:center}
+:root{
+  --bg:#eef1f7;--panel:#ffffff;--ink:#0e1730;--muted:#5c688a;--faint:#8a95b4;--line:#e4e8f1;--track:#e7ebf4;
+  --accent:#5b54e6;--good:#12a150;--fair:#d18700;--poor:#e0402f;
+  --shadow:0 1px 2px rgba(16,24,48,.04),0 8px 24px rgba(16,24,48,.06);
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#080c18;--panel:#111a30;--ink:#eef2fb;--muted:#98a4c6;--faint:#6f7ca3;--line:#212d4c;--track:#1c2743;
+  --accent:#9a8dff;--good:#38c47f;--fair:#eab53f;--poor:#f26a5a;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+}}
+:root[data-theme="dark"]{
+  --bg:#080c18;--panel:#111a30;--ink:#eef2fb;--muted:#98a4c6;--faint:#6f7ca3;--line:#212d4c;--track:#1c2743;
+  --accent:#9a8dff;--good:#38c47f;--fair:#eab53f;--poor:#f26a5a;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:40px 20px 72px}
+.gauge .track{stroke:var(--track)}
+.gauge .arc.good{stroke:var(--good)}.gauge .arc.fair{stroke:var(--fair)}.gauge .arc.poor{stroke:var(--poor)}
+.gauge .gtext{font-family:var(--mono);font-weight:700;font-variant-numeric:tabular-nums}
+.gtext.good{fill:var(--good)}.gtext.fair{fill:var(--fair)}.gtext.poor{fill:var(--poor)}
+
+.hero{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);
+  padding:30px 32px;display:flex;gap:28px;align-items:center;flex-wrap:wrap;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:linear-gradient(90deg,var(--accent),transparent 70%)}
+.hero-main{flex:1;min-width:230px}
+.brand{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.hero h1{margin:8px 0 4px;font-size:28px;font-weight:800;letter-spacing:-.01em;text-wrap:balance;word-break:break-word}
+.meta{color:var(--muted);font-size:13px}
+.pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted);
+  background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+.pill::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.pill.crit{color:var(--poor)}.pill.warn{color:var(--fair)}.pill.info{color:var(--accent)}
+.hero-gauge{display:flex;flex-direction:column;align-items:center;gap:8px}
+.hero-gauge .cap{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+.section-title{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:700;margin:34px 2px 14px}
+.gauges{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+.ga{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);
+  padding:18px 12px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.ga .lab{font-size:13px;font-weight:600}
+.ga .sub{font-size:11.5px;color:var(--muted)}
+.ga.skip{justify-content:center;min-height:150px;color:var(--faint)}
+.ga.skip .lab{color:var(--muted)}
+.ga.skip .nr{font-size:13px;font-weight:600;color:var(--faint)}
+
+.issue{position:relative;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow);padding:14px 16px 14px 18px;margin-bottom:10px}
+.issue.critical{border-left-color:var(--poor)}
+.issue.warning{border-left-color:var(--fair)}
+.issue.info{border-left-color:var(--accent)}
+.itop{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sev{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:6px;color:#fff}
+.issue.critical .sev{background:var(--poor)}.issue.warning .sev{background:var(--fair)}.issue.info .sev{background:var(--accent)}
+.chip{font-size:11px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.ititle{font-weight:600}
+.count{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.fix{margin-top:7px;font-size:13.5px;color:var(--muted)}
+.fix b{color:var(--ink);font-weight:600}
+.pages{margin-top:8px;font-size:11.5px;color:var(--faint);font-family:var(--mono);word-break:break-word}
+.clean{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
+  padding:26px;text-align:center;color:var(--good);font-weight:700;font-size:17px}
+.note{font-size:12px;color:var(--faint);margin-top:8px}
+footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);color:var(--faint);font-size:12px;text-align:center;line-height:1.7}
 footer a{color:var(--accent);text-decoration:none}
+footer code{font-family:var(--mono);font-size:11.5px;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
 `.trim();
 
 /** Render an audit report as a self-contained HTML document. */
@@ -119,9 +168,7 @@ export function generateReport(
   meta: { site: string; generatedAt: string },
 ): string {
   const pages = report.summary.pagesAudited ?? 1;
-  const skippedDims = new Set(
-    ALL_DIMENSIONS.filter((d) => report.skipped.some((s) => s.startsWith(d))),
-  );
+  const skippedDims = new Set(ALL_DIMENSIONS.filter((d) => report.skipped.some((s) => s.startsWith(d))));
 
   const perDim = ALL_DIMENSIONS.map((dim) => {
     const findings = report.findings.filter((f) => f.dimension === dim);
@@ -131,15 +178,18 @@ export function generateReport(
   const scored = perDim.filter((d) => !d.skipped);
   const overall = scored.length ? Math.round(scored.reduce((s, d) => s + d.score, 0) / scored.length) : 0;
 
-  const cardsHtml = perDim
+  const gaugesHtml = perDim
     .map((d) => {
       const label = esc(DIMENSION_LABELS[d.dim]);
       if (d.skipped) {
-        return `<div class="card skipped"><div class="dim">${label}</div><div class="num">not run</div><div class="issues-n">needs a domain / EDS_DOMAIN_KEY</div></div>`;
+        return `<div class="ga skip"><div class="nr">Not run</div><div class="lab">${label}</div><div class="sub">needs a domain / EDS_DOMAIN_KEY</div></div>`;
       }
-      const cls = scoreClass(d.score);
       const n = d.findings.length;
-      return `<div class="card"><div class="dim">${label}</div><div class="num ${cls}">${d.score}</div><div class="g">${grade(d.score)}</div><div class="issues-n">${n} issue${n === 1 ? '' : 's'}</div></div>`;
+      return (
+        `<div class="ga">${gauge({ size: 92, sw: 8, score: d.score, center: String(d.score), centerSize: 26 })}` +
+        `<div class="lab">${label}</div>` +
+        `<div class="sub">Grade ${grade(d.score)} · ${n} issue${n === 1 ? '' : 's'}</div></div>`
+      );
     })
     .join('');
 
@@ -149,22 +199,24 @@ export function generateReport(
         .slice(0, 100)
         .map((g) => {
           const pageList = g.pages.length
-            ? `<div class="pages">${g.pages.length} page${g.pages.length === 1 ? '' : 's'}: ${esc(g.pages.slice(0, 25).join(', '))}${g.pages.length > 25 ? ', …' : ''}</div>`
+            ? `<div class="pages">${g.pages.length} page${g.pages.length === 1 ? '' : 's'}: ${esc(g.pages.slice(0, 25).join('  ·  '))}${g.pages.length > 25 ? '  ·  …' : ''}</div>`
             : '';
-          const fix = g.suggestion ? `<div class="fix"><b>Fix:</b> ${esc(g.suggestion)}</div>` : '';
-          return `<div class="issue"><div class="top"><span class="badge ${g.severity}">${g.severity}</span><span class="chip">${esc(DIMENSION_LABELS[g.dimension])}</span><span class="title">${esc(g.title)}</span></div>${fix}${pageList}</div>`;
+          const fix = g.suggestion ? `<div class="fix"><b>Fix</b> — ${esc(g.suggestion)}</div>` : '';
+          const count = g.pages.length ? `<span class="count">${g.pages.length} page${g.pages.length === 1 ? '' : 's'}</span>` : '';
+          return (
+            `<div class="issue ${g.severity}"><div class="itop">` +
+            `<span class="sev">${g.severity}</span>` +
+            `<span class="chip">${esc(DIMENSION_LABELS[g.dimension])}</span>` +
+            `<span class="ititle">${esc(g.title)}</span>${count}</div>${fix}${pageList}</div>`
+          );
         })
         .join('')
     : `<div class="clean">No issues found. ✓</div>`;
 
   const s = report.summary;
-  const summaryLine =
-    s.total === 0
-      ? 'No issues found.'
-      : `${s.critical} critical · ${s.warning} warning · ${s.info} info across ${pages} page${pages === 1 ? '' : 's'}`;
   const oCls = scoreClass(overall);
   const skippedNote = report.skipped.length
-    ? `<div class="note">Not run: ${esc(report.skipped.join('; '))}</div>`
+    ? `<div class="note">Not measured: ${esc(report.skipped.join(' · '))}</div>`
     : '';
 
   return `<!doctype html>
@@ -178,23 +230,32 @@ export function generateReport(
 <body>
 <div class="wrap">
   <header class="hero">
-    <div class="left">
+    <div class="hero-main">
       <div class="brand">EDS Site Health</div>
       <h1>${esc(meta.site)}</h1>
       <div class="meta">Audited ${esc(meta.generatedAt)} · ${pages} page${pages === 1 ? '' : 's'} inspected</div>
+      <div class="pills">
+        <span class="pill crit">${s.critical} critical</span>
+        <span class="pill warn">${s.warning} warning</span>
+        <span class="pill info">${s.info} info</span>
+      </div>
       ${skippedNote}
     </div>
-    <div class="ograde">
-      <div class="ring ${oCls}">${grade(overall)}</div>
-      <div class="sub">${overall}/100 · ${esc(summaryLine)}</div>
+    <div class="hero-gauge">
+      ${gauge({ size: 132, sw: 11, score: overall, center: grade(overall), centerSize: 40 })}
+      <div class="cap">${overall}/100 overall</div>
     </div>
   </header>
-  <section class="cards">${cardsHtml}</section>
-  <h2>Prioritized issues${groups.length > 100 ? ` <span class="chip">showing 100 of ${groups.length}</span>` : ''}</h2>
+
+  <div class="section-title">By dimension</div>
+  <section class="gauges">${gaugesHtml}</section>
+
+  <div class="section-title">Prioritized issues${groups.length > 100 ? ` — showing 100 of ${groups.length}` : ''}</div>
   ${issuesHtml}
+
   <footer>
-    Generated by <a href="https://www.npmjs.com/package/@focusgts/eds-mcp-server">@focusgts/eds-mcp-server</a> ·
-    health score derived from findings · every issue above can be auto-fixed with the <code>eds_fix_*</code> tools.
+    Generated by <a href="https://www.npmjs.com/package/@focusgts/eds-mcp-server">@focusgts/eds-mcp-server</a><br>
+    Health score derived from findings · every issue above can be auto-fixed with the <code>eds_fix_*</code> tools.
   </footer>
 </div>
 </body>

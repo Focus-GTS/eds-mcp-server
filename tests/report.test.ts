@@ -36,25 +36,28 @@ describe('generateReport', () => {
   it('collapses the same finding across pages into one row with the page list', () => {
     const html = generateReport(makeReport(), META);
     expect((html.match(/Missing meta description/g) ?? []).length).toBe(1); // one row, not two
-    expect(html).toContain('2 pages: /a, /b');
+    expect(html).toContain('/a'); // both affected pages listed
+    expect(html).toContain('/b');
+    expect(html).toContain('2 pages'); // the aggregate count
     expect(html).toContain('Add a 120–160 char description.');
   });
 
   it('shows skipped dimensions as "not run", never a fake score', () => {
     const html = generateReport(makeReport(), META);
     // Performance and Links were skipped.
-    expect(html).toContain('not run');
+    expect(html).toContain('Not run');
     expect(html).toContain('Performance');
     expect(html).toContain('Links &amp; 404s');
   });
 
-  it('scores a dimension lower when it has criticals', () => {
+  it('scores a dimension lower when it has criticals, and renders a gauge', () => {
     // SEO has 2 criticals over 5 pages -> below 100; Freshness has none -> 100.
     const html = generateReport(makeReport(), META);
-    // Freshness ran with no findings -> perfect.
-    expect(html).toMatch(/Freshness<\/div><div class="num good">100/);
-    // Overall grade badge is present.
-    expect(html).toMatch(/class="ring (good|fair|poor)"/);
+    // Freshness ran with no findings -> perfect score shown in its gauge.
+    expect(html).toContain('>100</text>');
+    expect(html).toContain('Freshness');
+    // The overall ring gauge is present (an SVG arc, color-coded).
+    expect(html).toMatch(/class="arc (good|fair|poor)"/);
   });
 
   it('renders a clean report when there are no findings', () => {
