@@ -659,14 +659,12 @@ export function createServer(options: EdsClientOptions): McpServer {
         .max(500)
         .describe('The redirect rules to add or update'),
       dryRun: z.boolean().optional().describe('Preview the rules without writing (recommended first pass)'),
-      withUndo: z.boolean().optional().describe('Make the write reversible — returns an undo object for eds_da_rollback'),
       publish: z.boolean().optional().describe('Preview + publish the redirects sheet so the rules go live'),
     },
     async (args) =>
       fixHandlers.handleFixRedirect(daClient, client, {
         redirects: args.redirects,
         dryRun: args.dryRun,
-        withUndo: args.withUndo,
         publish: args.publish,
       }),
   );

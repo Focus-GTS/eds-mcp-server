@@ -263,7 +263,6 @@ export async function handleFixRedirect(
   args: {
     redirects: RedirectRule[];
     dryRun?: boolean;
-    withUndo?: boolean;
     publish?: boolean;
   },
 ) {
@@ -291,9 +290,11 @@ export async function handleFixRedirect(
       return textResult(lines.join('\n'));
     }
 
+    // Always capture undo — a bad redirect hides a live page, so this write must
+    // always be reversible.
     const push = await daClient.pushDocuments(
       [{ path: '/redirects', content: html, contentType: existing?.contentType ?? 'text/html' }],
-      { withUndo: args.withUndo },
+      { withUndo: true },
     );
     if (push.failed.length > 0) {
       return errorResult(new Error(`Failed to write /redirects: ${push.failed[0].error}`));

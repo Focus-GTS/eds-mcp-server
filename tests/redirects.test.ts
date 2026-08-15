@@ -79,6 +79,37 @@ describe('applyRedirects', () => {
     const { html } = applyRedirects(null, [{ source: '/a', destination: '/b?x=1&y=2' }]);
     expect(html).toContain('/b?x=1&amp;y=2');
   });
+
+  // --- Regression tests for adversarial-review findings ---
+
+  it('refuses a self-redirect (loop that would hide the page)', () => {
+    expect(() => applyRedirects(null, [{ source: '/x', destination: '/x' }])).toThrow(/self-redirect/i);
+  });
+
+  it('refuses to redirect the site root "/" (would hide the homepage)', () => {
+    expect(() => applyRedirects(null, [{ source: '/', destination: '/home' }])).toThrow(/root|homepage/i);
+  });
+
+  it('refuses to overwrite a present-but-unrecognizable /redirects doc (no silent wipe)', () => {
+    expect(() => applyRedirects('<body><p>not a sheet</p></body>', [{ source: '/a', destination: '/b' }])).toThrow(
+      /recognizable sheet|refusing to overwrite/i,
+    );
+  });
+
+  it('preserves an untouched row with an authored link verbatim (no destination loss)', () => {
+    const linked = `<body><main><div><table>
+  <tr><td>Source</td><td>Destination</td></tr>
+  <tr><td>/promo</td><td><a href="https://x.com/deep">https://x.com/deep</a></td></tr>
+</table></div></main></body>`;
+    const { html } = applyRedirects(linked, [{ source: '/new', destination: '/n' }]);
+    expect(html).toContain('href="https://x.com/deep"'); // untouched row's link survives
+    expect(parseRedirects(html)).toContainEqual({ source: '/promo', destination: 'https://x.com/deep' });
+  });
+
+  it('reads an authored-link destination as its href, not the link text', () => {
+    const linked = '<body><table><tr><td>Source</td><td>Destination</td></tr><tr><td>/promo</td><td><a href="https://x.com/deep">go</a></td></tr></table></body>';
+    expect(parseRedirects(linked)).toEqual([{ source: '/promo', destination: 'https://x.com/deep' }]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -155,6 +186,13 @@ describe('handleFixRedirect', () => {
       redirects: [{ source: '/old', destination: '/new' }], // already in SHEET
     });
     expect(res.content[0].text).toContain('No redirect changes needed');
+  });
+
+  it('always captures undo (a redirect can hide a page, so it must be reversible)', async () => {
+    const res = await handleFixRedirect(fakeDa(), fakeEds(), {
+      redirects: [{ source: '/gone', destination: '/home' }],
+    });
+    expect(res.content[0].text).toContain('eds_da_rollback');
   });
 
   it('surfaces a refusal to edit an unfamiliar sheet via isError', async () => {
