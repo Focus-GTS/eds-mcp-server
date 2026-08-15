@@ -214,7 +214,6 @@ export function generateReport(
     : `<div class="clean">No issues found. ✓</div>`;
 
   const s = report.summary;
-  const oCls = scoreClass(overall);
   const skippedNote = report.skipped.length
     ? `<div class="note">Not measured: ${esc(report.skipped.join(' · '))}</div>`
     : '';
