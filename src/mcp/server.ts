@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 35 tools registered.
+ * Creates a {@link McpServer} instance with all 36 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -642,6 +642,33 @@ export function createServer(options: EdsClientOptions): McpServer {
       });
       return fixHandlers.handleBulkFixMetadata(daClient, client, { pages, dryRun: args.dryRun, publish: args.publish });
     },
+  );
+
+  server.tool(
+    'eds_fix_redirect',
+    'Fix broken links (404s) by adding redirect rules to the site\'s `redirects` sheet — the EDS mechanism that serves 301 redirects. Pass one or many { source, destination } rules (source = relative path like /old-page; destination = a relative path or full URL). Idempotent (updates a rule for an existing source, never duplicates). Routed through the safe-writes path (dry-run + undo); publish:true publishes the sheet so redirects go live. Requires EDS_DA_TOKEN. Pair with eds_audit_site (which surfaces the top 404s from real-user data).',
+    {
+      redirects: z
+        .array(
+          z.object({
+            source: z.string().min(1).describe('The path that should redirect (relative, e.g. /old-page)'),
+            destination: z.string().min(1).describe('Where it should go — a relative path or a full URL'),
+          }),
+        )
+        .min(1)
+        .max(500)
+        .describe('The redirect rules to add or update'),
+      dryRun: z.boolean().optional().describe('Preview the rules without writing (recommended first pass)'),
+      withUndo: z.boolean().optional().describe('Make the write reversible — returns an undo object for eds_da_rollback'),
+      publish: z.boolean().optional().describe('Preview + publish the redirects sheet so the rules go live'),
+    },
+    async (args) =>
+      fixHandlers.handleFixRedirect(daClient, client, {
+        redirects: args.redirects,
+        dryRun: args.dryRun,
+        withUndo: args.withUndo,
+        publish: args.publish,
+      }),
   );
 
   return server;
