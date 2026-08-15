@@ -10,7 +10,7 @@
 
 ### Let an AI agent run your Adobe Edge Delivery site.
 
-**34 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**35 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 ![Ask your agent](https://readme-typing-svg.demolab.com/?font=JetBrains+Mono&size=20&duration=2600&pause=800&color=6E56CF&center=true&vCenter=true&width=640&height=42&lines=%22Preview+and+publish+the+homepage%22;%22What+are+the+Core+Web+Vitals%3F%22;%22Find+pages+missing+a+description%22;%22Publish+all+the+blog+posts%22)
@@ -40,7 +40,7 @@ That's it — no local AEM, no scripts, no glue code.
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>34 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>35 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -75,7 +75,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 34 tools
+## 🛠️ The 35 tools
 
 ### Edge Delivery Services — publish, content, analytics
 
@@ -162,8 +162,11 @@ Nine tools reach a site's Document Authoring source directly (`admin.da.live`), 
 ### Safe fixes — repair what the audit finds
 
 - `eds_fix_metadata`
+- `eds_bulk_fix_metadata`
 
-> **It fixes what it finds — reversibly.** `eds_fix_metadata` repairs a page's title, meta description and Open Graph image by editing its Document Authoring source, routed through the same **dry-run + undo** path as the write tools. The agent supplies the content (e.g. writes a fitting description); the tool writes it *correctly and idempotently* (merges into the page's Metadata block, never duplicates it). Pass `publish: true` to preview + publish so the change goes live. The full loop: **audit → fix → publish → re-audit to zero.**
+> **It fixes what it finds — reversibly.** `eds_fix_metadata` repairs a page's title, meta description and Open Graph image by editing its Document Authoring source, routed through the same **dry-run + undo** path as the write tools. The agent supplies the content (e.g. writes a fitting description); the tool writes it *correctly and idempotently* (merges into the page's Metadata block, never duplicates it). Pass `publish: true` to preview + publish so the change goes live.
+>
+> **`eds_bulk_fix_metadata`** does it across a **whole site in one reversible operation** — pass a list of `{ path, metadata }`, and it writes every changed page in a single batch that returns **one** undo reverting all of it. The full loop: **`eds_audit_site` → fix the batch → publish → re-audit to zero** — with a single undo if anything looks off.
 
 ---
 

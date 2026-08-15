@@ -7,7 +7,7 @@ import {
   parseMetadataRows,
   buildMetadataBlock,
 } from '../src/fix/metadata.js';
-import { handleFixMetadata } from '../src/mcp/fix-handlers.js';
+import { handleFixMetadata, handleBulkFixMetadata } from '../src/mcp/fix-handlers.js';
 
 // A minimal DA source: content section, no metadata block.
 const PAGE = `<body>
@@ -242,5 +242,132 @@ describe('handleFixMetadata', () => {
     });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain('403 Forbidden');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleBulkFixMetadata
+// ---------------------------------------------------------------------------
+
+// A page that already has the description "Has it" (so a fix to that value is a no-op).
+const PAGE_HAS_DESC = applyMetadata(PAGE, { description: 'Has it' }).html;
+
+function bulkDa(over: Record<string, unknown> = {}): DaClient {
+  const sources: Record<string, string> = { '/a': PAGE, '/b': PAGE_HAS_DESC };
+  return {
+    getSource: async (p: string) => {
+      const key = p.replace(/\.html$/, '');
+      if (key === '/c' || key === 'c') throw new Error('404 not found');
+      const content = sources[key] ?? sources['/' + key];
+      return { path: `${key.startsWith('/') ? key : '/' + key}.html`, content, contentType: 'text/html' };
+    },
+    pushDocuments: async (docs: Array<{ path: string }>, opts?: { withUndo?: boolean }) => ({
+      succeeded: docs.map((d) => d.path),
+      failed: [],
+      ...(opts?.withUndo ? { undo: { restore: docs.map((d) => ({ path: d.path, content: 'prior' })), remove: [] } } : {}),
+    }),
+    ...over,
+  } as unknown as DaClient;
+}
+
+describe('handleBulkFixMetadata', () => {
+  it('changes only the pages that need it and returns ONE undo for the batch', async () => {
+    const res = await handleBulkFixMetadata(bulkDa(), fakeEds(), {
+      pages: [
+        { path: '/a', metadata: { description: 'A new description for page A.' } },
+        { path: '/b', metadata: { description: 'Has it' } }, // already correct -> no-op
+      ],
+    });
+    const text = res.content[0].text;
+    expect(text).toContain('Fixed 1 page(s) in one batch');
+    expect(text).toContain('1 already correct');
+    // A single undo object covers the whole batch.
+    expect(text).toContain('undo this ENTIRE batch');
+    expect((text.match(/"undo":/g) ?? []).length).toBe(1);
+  });
+
+  it('dryRun previews the whole plan and writes nothing', async () => {
+    let wrote = false;
+    const da = bulkDa({ pushDocuments: async () => { wrote = true; return { succeeded: [], failed: [] }; } });
+    const res = await handleBulkFixMetadata(da, fakeEds(), {
+      pages: [{ path: '/a', metadata: { description: 'X marks the spot on page A here.' } }],
+      dryRun: true,
+    });
+    expect(res.content[0].text).toContain('Dry run — nothing written. 1 page(s) would change');
+    expect(wrote).toBe(false);
+  });
+
+  it('records unreadable pages without aborting the batch', async () => {
+    const res = await handleBulkFixMetadata(bulkDa(), fakeEds(), {
+      pages: [
+        { path: '/a', metadata: { description: 'A fresh description for A.' } },
+        { path: '/c', metadata: { description: 'never read' } }, // getSource throws
+      ],
+    });
+    const text = res.content[0].text;
+    expect(text).toContain('Fixed 1 page(s)');
+    expect(text).toContain('1 unreadable');
+  });
+
+  it('publishes the written pages when publish:true', async () => {
+    const publishedPaths: string[] = [];
+    const eds = fakeEds({ previewAndPublish: async (p: string) => { publishedPaths.push(p); return { preview: {}, publish: {} }; } });
+    const res = await handleBulkFixMetadata(bulkDa(), eds, {
+      pages: [{ path: '/a', metadata: { description: 'A description worth publishing now.' } }],
+      publish: true,
+    });
+    expect(publishedPaths).toEqual(['/a']);
+    expect(res.content[0].text).toContain('Published 1/1 page(s) live');
+  });
+
+  it('reports a clean no-op when every page is already correct', async () => {
+    const res = await handleBulkFixMetadata(bulkDa(), fakeEds(), {
+      pages: [{ path: '/b', metadata: { description: 'Has it' } }],
+    });
+    expect(res.content[0].text).toContain('No changes needed');
+  });
+
+  it('dedupes duplicate paths and MERGES their metadata (no double-write / broken undo)', async () => {
+    let pushed: Array<{ path: string; content: string }> | undefined;
+    const da = bulkDa({
+      pushDocuments: async (docs: Array<{ path: string; content: string }>, opts?: { withUndo?: boolean }) => {
+        pushed = docs;
+        return { succeeded: docs.map((d) => d.path), failed: [], ...(opts?.withUndo ? { undo: { restore: [], remove: [] } } : {}) };
+      },
+    });
+    const res = await handleBulkFixMetadata(da, fakeEds(), {
+      pages: [
+        { path: '/a', metadata: { title: 'A New Title For The Page Here' } },
+        { path: '/a', metadata: { description: 'A fitting description for page A now.' } }, // same page, other field
+      ],
+    });
+    expect(pushed).toHaveLength(1); // one write for /a, not two racing writes
+    expect(pushed![0].content).toContain('Title');
+    expect(pushed![0].content).toContain('Description'); // fields merged
+    expect(res.content[0].text).toContain('Fixed 1 page(s)');
+  });
+
+  it('leads with the failure (not "no changes") when every page is unreadable', async () => {
+    const res = await handleBulkFixMetadata(bulkDa(), fakeEds(), {
+      pages: [{ path: '/c', metadata: { description: 'never read' } }],
+    });
+    expect(res.content[0].text).toContain('Nothing written');
+    expect(res.content[0].text).toContain('could not be read');
+    expect(res.content[0].text).not.toContain('No changes needed');
+  });
+
+  it('does not inline an oversized undo blob', async () => {
+    const da = bulkDa({
+      pushDocuments: async (docs: Array<{ path: string }>) => ({
+        succeeded: docs.map((d) => d.path),
+        failed: [],
+        undo: { restore: [{ path: '/a.html', content: 'x'.repeat(250_000) }], remove: [] },
+      }),
+    });
+    const res = await handleBulkFixMetadata(da, fakeEds(), {
+      pages: [{ path: '/a', metadata: { description: 'A real description for the page here.' } }],
+    });
+    expect(res.content[0].text).toContain('too large to return inline');
+    expect(res.content[0].text).not.toContain('"undo":');
   });
 });

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bulk safe fixes** (ADR-012). `eds_bulk_fix_metadata` — fix SEO/social metadata
+  across many pages in one reversible operation. Takes `pages: [{ path, metadata }]`
+  (the agent supplies each page's values), applies the ADR-011 metadata writer to
+  each, and pushes every changed page in a single `eds_da_push withUndo` so the
+  result carries **one** undo object that reverts the entire batch via
+  `eds_da_rollback`. `dryRun` previews the whole plan; `publish:true` previews +
+  publishes the changed pages (bounded concurrency). Partial-failure tolerant —
+  unreadable pages are recorded, never abort the batch. 35 tools total.
+
 ## [0.9.0] - 2026-08-14
 
 ### Added
