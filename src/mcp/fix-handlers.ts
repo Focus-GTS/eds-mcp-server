@@ -11,6 +11,7 @@ import type { EdsClient } from '../eds-admin/client.js';
 import type { DaClient } from '../da-admin/client.js';
 import { formatError } from '../utils/errors.js';
 import { applyMetadata, type MetadataFields } from '../fix/metadata.js';
+import { applyRedirects, type RedirectRule } from '../fix/redirects.js';
 
 function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }] };
@@ -239,6 +240,81 @@ export async function handleBulkFixMetadata(
           `(This batch's undo is ${Math.round(undoJson.length / 1024)} KB — too large to return inline. For a single returnable undo, run smaller batches; DA also versions every page, so any page can be reverted from its version history.)`,
         );
       }
+    }
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+/** Read a DA source, or null if it does not exist (404). */
+async function getSourceOrNull(daClient: DaClient, path: string) {
+  try {
+    return await daClient.getSource(path);
+  } catch (e) {
+    if (e && typeof e === 'object' && 'status' in e && (e as { status: number }).status === 404) return null;
+    throw e;
+  }
+}
+
+export async function handleFixRedirect(
+  daClient: DaClient,
+  edsClient: EdsClient,
+  args: {
+    redirects: RedirectRule[];
+    dryRun?: boolean;
+    publish?: boolean;
+  },
+) {
+  try {
+    // The redirects sheet is a JSON document at /redirects.json (an EDS sheet —
+    // NOT an HTML table, which would become a block).
+    const existing = await getSourceOrNull(daClient, '/redirects.json');
+
+    let applied;
+    try {
+      applied = applyRedirects(existing?.content ?? null, args.redirects);
+    } catch (e) {
+      return errorResult(e); // e.g. an unrecognizable / multi-sheet existing doc
+    }
+    const { content, changes } = applied;
+
+    if (changes.length === 0) {
+      return textResult('No redirect changes needed — every rule is already in the sheet.');
+    }
+
+    if (args.dryRun) {
+      const lines = [
+        `Dry run — nothing written. ${changes.length} redirect rule(s) would ${existing ? 'change' : 'be created'}:`,
+        '',
+      ];
+      for (const c of changes) lines.push(`  ${c.source} → ${c.to}${c.from ? ` (was ${c.from})` : ''}`);
+      return textResult(lines.join('\n'));
+    }
+
+    // Always capture undo — a bad redirect hides a live page, so this write must
+    // always be reversible.
+    const push = await daClient.pushDocuments(
+      [{ path: '/redirects.json', content, contentType: 'application/json' }],
+      { withUndo: true },
+    );
+    if (push.failed.length > 0) {
+      return errorResult(new Error(`Failed to write /redirects.json: ${push.failed[0].error}`));
+    }
+
+    const lines = [`${existing ? 'Updated' : 'Created'} the redirects sheet — ${changes.length} rule(s).`];
+    if (args.publish) {
+      try {
+        await edsClient.previewAndPublish('/redirects.json');
+        lines.push('Previewed + published — the redirects are live.');
+      } catch (e) {
+        lines.push(`(Written to DA, but publish failed: ${formatError(e)} — publish /redirects.json manually.)`);
+      }
+    } else {
+      lines.push('(Written to DA. Pass publish:true, or publish /redirects.json, to make them live.)');
+    }
+    if (push.undo) {
+      lines.push('', 'To undo, call eds_da_rollback with:', JSON.stringify({ undo: push.undo }));
     }
     return textResult(lines.join('\n'));
   } catch (error) {

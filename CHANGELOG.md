@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Redirect fixes — close the 404 loop** (ADR-013). `eds_fix_redirect` fixes
+  broken links by adding 301 redirect rules to the site's `redirects` sheet — the
+  EDS mechanism served at `/redirects.json`. Takes one or many `{ source,
+  destination }` rules; reads the existing `/redirects` document (or creates a new
+  sheet), updates a rule for a matching Source or appends a new row, and
+  **preserves the sheet's headers and any extra columns** (no data loss).
+  Idempotent, routed through the safe-writes path (`dryRun` + `withUndo` →
+  `eds_da_rollback`), with optional `publish`. All rules live in one sheet, so a
+  single tool handles one rule or many. Pairs with `eds_audit_site` (which
+  surfaces the top 404s from real-user data) — the audit now has a fix for every
+  major finding type. 36 tools total.
+
 ## [0.10.0] - 2026-08-14
 
 ### Added
