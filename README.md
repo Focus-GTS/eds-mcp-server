@@ -8,12 +8,15 @@
 [![awesome-mcp-servers](https://img.shields.io/badge/awesome--mcp--servers-listed-FFD700)](https://github.com/punkpeye/awesome-mcp-servers)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-### Let an AI agent run your Adobe Edge Delivery site.
+### Let an AI agent run — and *improve* — your Adobe Edge Delivery site.
 
 **35 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
-![Ask your agent](https://readme-typing-svg.demolab.com/?font=JetBrains+Mono&size=20&duration=2600&pause=800&color=6E56CF&center=true&vCenter=true&width=640&height=42&lines=%22Preview+and+publish+the+homepage%22;%22What+are+the+Core+Web+Vitals%3F%22;%22Find+pages+missing+a+description%22;%22Publish+all+the+blog+posts%22)
+**Read your content → audit it → fix what's wrong → publish → undo any of it.**
+One page or the whole site, in a single reversible operation. Preview before every write; undo after.
+
+![Ask your agent](https://readme-typing-svg.demolab.com/?font=JetBrains+Mono&size=20&duration=2600&pause=800&color=6E56CF&center=true&vCenter=true&width=680&height=42&lines=%22Audit+my+whole+site+for+SEO+issues%22;%22Fix+every+missing+description+-+safely%22;%22Publish+all+the+blog+posts%22;%22Undo+that+last+batch%22)
 
 </div>
 
@@ -27,12 +30,25 @@ claude mcp add eds -e EDS_OWNER=your-org -e EDS_REPO=your-site -- npx @focusgts/
 
 Then just ask your agent:
 
+> *"Audit the whole site and show me what's hurting SEO."*
+> *"Fix the meta description on every page that's missing one — preview first, then publish."*
+> *"Actually, undo that whole batch."*
 > *"Preview and publish the homepage."*
-> *"What are the Core Web Vitals across the site?"*
-> *"Find every page about pricing and list the ones missing a description."*
-> *"Export the whole `/blog` folder, fix every heading, and push it back."*
 
-That's it — no local AEM, no scripts, no glue code.
+That's it — no local AEM, no scripts, no glue code. Every write is previewable and reversible.
+
+### The loop that makes it different
+
+```mermaid
+flowchart LR
+  A["📖 Read<br/>authored content (DA)"] --> B["🔍 Audit<br/>SEO · a11y · perf · freshness"]
+  B --> C["🛠️ Fix<br/>one page or the whole site"]
+  C --> D["🚀 Publish<br/>preview + live"]
+  D --> E["↩️ Undo<br/>one call reverts it all"]
+  E -. "re-audit to zero" .-> B
+```
+
+It doesn't just *drive* your site — it **improves** it, safely. Point it at an EDS site and an agent can find what's wrong and repair it, one page or the whole site in a single batch that a single `eds_da_rollback` reverts. No other MCP server — including Adobe's own — does this end-to-end.
 
 ---
 
