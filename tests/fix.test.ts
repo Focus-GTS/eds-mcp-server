@@ -7,7 +7,7 @@ import {
   parseMetadataRows,
   buildMetadataBlock,
 } from '../src/fix/metadata.js';
-import { handleFixMetadata, handleBulkFixMetadata } from '../src/mcp/fix-handlers.js';
+import { handleFixMetadata, handleBulkFixMetadata, handleFixAudit } from '../src/mcp/fix-handlers.js';
 
 // A minimal DA source: content section, no metadata block.
 const PAGE = `<body>
@@ -369,5 +369,148 @@ describe('handleBulkFixMetadata', () => {
     });
     expect(res.content[0].text).toContain('too large to return inline');
     expect(res.content[0].text).not.toContain('"undo":');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleFixAudit — apply audit findings across metadata + redirects (ADR-015)
+// ---------------------------------------------------------------------------
+
+/** A DA fake whose /redirects.json does not exist yet (404 → fresh sheet). */
+function fakeDaAudit(over: Record<string, unknown> = {}): DaClient {
+  return {
+    getSource: async (p: string) => {
+      if (p === '/redirects.json') {
+        const e = new Error('not found') as Error & { status: number };
+        e.status = 404;
+        throw e;
+      }
+      return { path: '/blog/post.html', content: PAGE, contentType: 'text/html' };
+    },
+    pushDocuments: async (docs: Array<{ path: string }>, opts?: { withUndo?: boolean }) => ({
+      succeeded: docs.map((d) => d.path),
+      failed: [],
+      ...(opts?.withUndo ? { undo: { restore: docs.map((d) => ({ path: d.path, content: 'prior' })), remove: [] } } : {}),
+    }),
+    ...over,
+  } as unknown as DaClient;
+}
+
+describe('handleFixAudit', () => {
+  it('rejects when neither metadata nor redirects are supplied', async () => {
+    const res = await handleFixAudit(fakeDaAudit(), fakeEds(), {});
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/[Nn]othing to fix/);
+  });
+
+  it('dryRun previews metadata + redirects and writes nothing', async () => {
+    let wrote = false;
+    const da = fakeDaAudit({
+      pushDocuments: async () => {
+        wrote = true;
+        return { succeeded: [], failed: [] };
+      },
+    });
+    const res = await handleFixAudit(da, fakeEds(), {
+      metadata: [{ path: '/blog/post', metadata: { description: 'A fresh, useful description of the page contents right here.' } }],
+      redirects: [{ source: '/old', destination: '/new' }],
+      dryRun: true,
+    });
+    expect(wrote).toBe(false);
+    expect(res.content[0].text).toMatch(/Dry run/);
+    expect(res.content[0].text).toContain('/blog/post.html');
+    expect(res.content[0].text).toMatch(/redirect/i);
+  });
+
+  it('applies metadata AND redirects in ONE push with a single aggregated undo', async () => {
+    const pushed: Array<Array<{ path: string }>> = [];
+    const da = fakeDaAudit({
+      pushDocuments: async (docs: Array<{ path: string }>, opts?: { withUndo?: boolean }) => {
+        pushed.push(docs);
+        return {
+          succeeded: docs.map((d) => d.path),
+          failed: [],
+          ...(opts?.withUndo ? { undo: { restore: docs.map((d) => ({ path: d.path, content: 'prior' })), remove: [] } } : {}),
+        };
+      },
+    });
+    const res = await handleFixAudit(da, fakeEds(), {
+      metadata: [{ path: '/blog/post', metadata: { title: 'A good, descriptive page title goes here' } }],
+      redirects: [{ source: '/old', destination: '/new' }],
+    });
+    // Exactly ONE push, containing both the page and the redirects sheet.
+    expect(pushed).toHaveLength(1);
+    const paths = pushed[0].map((d) => d.path);
+    expect(paths).toContain('/blog/post.html');
+    expect(paths).toContain('/redirects.json');
+    // A single rollback reverses everything.
+    expect(res.content[0].text).toContain('eds_da_rollback');
+  });
+
+  it('publish makes the whole batch live (page + redirects sheet)', async () => {
+    const published: string[] = [];
+    const eds = fakeEds({
+      previewAndPublish: async (p: string) => {
+        published.push(p);
+        return { preview: {}, publish: {} };
+      },
+    });
+    const res = await handleFixAudit(fakeDaAudit(), eds, {
+      metadata: [{ path: '/blog/post', metadata: { title: 'A good, descriptive page title goes here' } }],
+      redirects: [{ source: '/old', destination: '/new' }],
+      publish: true,
+    });
+    expect(published).toContain('/blog/post');
+    expect(published).toContain('/redirects.json');
+    expect(res.content[0].text).toMatch(/Published/);
+  });
+
+  it('reports only what actually got written on a partial write failure', async () => {
+    // The page write fails; only the redirects sheet succeeds.
+    const da = fakeDaAudit({
+      pushDocuments: async (docs: Array<{ path: string }>, opts?: { withUndo?: boolean }) => ({
+        succeeded: ['/redirects.json'],
+        failed: [{ path: '/blog/post.html', error: '403 Forbidden' }],
+        ...(opts?.withUndo ? { undo: { restore: [{ path: '/redirects.json', content: 'prior' }], remove: [] } } : {}),
+      }),
+    });
+    const res = await handleFixAudit(da, fakeEds(), {
+      metadata: [{ path: '/blog/post', metadata: { title: 'A good, descriptive page title goes here' } }],
+      redirects: [{ source: '/old', destination: '/new' }],
+    });
+    const text = res.content[0].text;
+    // Must NOT claim the failed page was fixed.
+    expect(text).toContain('Fixed 0 page(s)');
+    expect(text).toContain('1 redirect rule(s)');
+    expect(text).toContain('1 write failure(s)');
+    expect(text).toContain('/blog/post.html — 403 Forbidden');
+  });
+
+  it('warns that a published batch must be republished after rollback', async () => {
+    const res = await handleFixAudit(fakeDaAudit(), fakeEds(), {
+      redirects: [{ source: '/old', destination: '/new' }],
+      publish: true,
+    });
+    expect(res.content[0].text).toMatch(/republish the affected paths/i);
+  });
+
+  it('metadata only: does not touch the redirects sheet', async () => {
+    let readRedirects = false;
+    const da = fakeDaAudit({
+      getSource: async (p: string) => {
+        if (p === '/redirects.json') {
+          readRedirects = true;
+          const e = new Error('not found') as Error & { status: number };
+          e.status = 404;
+          throw e;
+        }
+        return { path: '/blog/post.html', content: PAGE, contentType: 'text/html' };
+      },
+    });
+    const res = await handleFixAudit(da, fakeEds(), {
+      metadata: [{ path: '/blog/post', metadata: { description: 'A fresh, useful description of the page contents right here.' } }],
+    });
+    expect(readRedirects).toBe(false);
+    expect(res.content[0].text).not.toContain('/redirects.json');
   });
 });

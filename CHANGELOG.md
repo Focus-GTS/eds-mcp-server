@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Fix-from-audit — close the loop** (ADR-015). `eds_fix_audit` applies the
+  audit's fixable findings — SEO metadata **and** broken-link redirects — in a
+  single reversible batch. Audit findings now carry a stable `code` and, where a
+  shipped writer can repair them, a `fix` descriptor; the tool takes agent-
+  supplied `metadata` and/or `redirects` values (it **never fabricates copy**) and
+  pushes every changed document (metadata pages + `/redirects.json`) in one
+  `withUndo` push, so a **single** `eds_da_rollback` reverses the whole mixed
+  batch. `dryRun` previews the combined plan; `publish:true` makes it live. Pure
+  orchestration over the ADR-011/013 writers — no new write logic. The report
+  (ADR-014) now marks repairable findings with a **✦ Fixable** chip and an honest
+  "N of M can be fixed in place" lead. 38 tools total.
+- **Shareable site-health report** (ADR-014). `eds_audit_report` runs the site
+  audit and returns a **self-contained, theme-aware HTML report** (inline
+  CSS/SVG, no external assets, no dependencies): an overall grade, per-dimension
+  health scores (SEO, accessibility, performance, freshness, links, sitemap)
+  shown as circular gauges, and a prioritized issue list — identical findings
+  collapsed across pages — each with its suggested fix and a hover explainer.
+  Dimensions that couldn't run are shown as "not run yet", never a fake score;
+  the health score is derived transparently from the findings. Same options as
+  `eds_audit_site`. Read-only.
+
 ## [0.11.0] - 2026-08-15
 
 ### Added

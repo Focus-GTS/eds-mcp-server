@@ -92,6 +92,7 @@ function freshnessFindings(entries: EdsQueryIndexEntry[], now: number): AuditFin
   return [
     {
       dimension: 'freshness',
+      code: 'freshness-stale',
       severity: 'warning',
       title: `${stale.length} page(s) not updated in over a year`,
       detail: `Stale pages: ${preview(stale.map((e) => e.path))}`,
@@ -109,6 +110,7 @@ function sitemapFindings(
     return [
       {
         dimension: 'sitemap',
+        code: 'sitemap-empty',
         severity: 'warning',
         title: 'No sitemap entries',
         detail: 'sitemap.xml returned no URLs.',
@@ -130,6 +132,7 @@ function sitemapFindings(
   return [
     {
       dimension: 'sitemap',
+      code: 'sitemap-missing-pages',
       severity: 'info',
       title: `${missing.length} indexed page(s) missing from the sitemap`,
       detail: `Not in sitemap: ${preview(missing)}`,
@@ -148,6 +151,7 @@ function performanceFindings(cwv: EdsCwvData[]): AuditFinding[] {
   if (slowLcp.length > 0) {
     findings.push({
       dimension: 'performance',
+      code: 'perf-slow-lcp',
       severity: 'warning',
       title: `${slowLcp.length} page(s) with slow LCP (>2.5s)`,
       detail: `Worst: ${worst(slowLcp, (c) => `${c.url} ${Math.round(c.lcp)}ms`, (c) => c.lcp)}`,
@@ -158,6 +162,7 @@ function performanceFindings(cwv: EdsCwvData[]): AuditFinding[] {
   if (shiftyCls.length > 0) {
     findings.push({
       dimension: 'performance',
+      code: 'perf-high-cls',
       severity: 'warning',
       title: `${shiftyCls.length} page(s) with layout shift (CLS >0.1)`,
       detail: `Worst: ${worst(shiftyCls, (c) => `${c.url} ${c.cls.toFixed(2)}`, (c) => c.cls)}`,
@@ -168,6 +173,7 @@ function performanceFindings(cwv: EdsCwvData[]): AuditFinding[] {
   if (laggyInp.length > 0) {
     findings.push({
       dimension: 'performance',
+      code: 'perf-slow-inp',
       severity: 'warning',
       title: `${laggyInp.length} page(s) with slow interaction (INP >200ms)`,
       detail: `Worst: ${worst(laggyInp, (c) => `${c.url} ${Math.round(c.inp)}ms`, (c) => c.inp)}`,
@@ -184,10 +190,12 @@ function link404Findings(entries: Eds404Entry[]): AuditFinding[] {
   return [
     {
       dimension: 'links',
+      code: 'links-broken-404',
       severity: 'warning',
       title: `${entries.length} URL(s) returning 404`,
       detail: `Top 404s: ${top.map((e) => `${e.url} (${e.views} views)`).join(', ')}`,
       suggestion: 'Add redirects for these URLs, or fix the links pointing to them.',
+      fix: { tool: 'eds_fix_redirect', field: 'redirect' },
     },
   ];
 }
@@ -280,6 +288,7 @@ export async function auditSite(
         } catch (error) {
           findings.push({
             dimension: 'links',
+            code: 'page-unfetchable',
             severity: 'info',
             page: entry.path,
             title: 'Page could not be fetched',

@@ -9,6 +9,7 @@ import type { EdsClient } from '../eds-admin/client.js';
 import { formatError } from '../utils/errors.js';
 import { auditSite, auditSinglePage, type AuditSiteOptions } from '../audit/engine.js';
 import type { AuditDimension, AuditFinding, AuditReport } from '../audit/types.js';
+import { generateReport } from '../audit/report.js';
 
 function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }] };
@@ -76,6 +77,33 @@ export async function handleAuditPage(
   try {
     const { html } = await client.getRenderedPage(args.path);
     return textResult(formatReport(auditSinglePage(html, args.path)));
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export async function handleAuditReport(
+  client: EdsClient,
+  site: string,
+  args: {
+    pathPrefix?: string;
+    maxPages?: number;
+    dimensions?: AuditDimension[];
+    domain?: string;
+    days?: number;
+  },
+) {
+  try {
+    const options: AuditSiteOptions = {
+      pathPrefix: args.pathPrefix,
+      maxPages: args.maxPages,
+      dimensions: args.dimensions,
+      domain: args.domain,
+      days: args.days,
+    };
+    const report = await auditSite(client, options);
+    const html = generateReport(report, { site, generatedAt: new Date().toISOString().slice(0, 10) });
+    return textResult(html);
   } catch (error) {
     return errorResult(error);
   }

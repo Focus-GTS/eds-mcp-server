@@ -10,7 +10,7 @@
 
 ### Let an AI agent run — and *improve* — your Adobe Edge Delivery site.
 
-**36 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**38 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 **Read your content → audit it → fix what's wrong → publish → undo any of it.**
@@ -56,7 +56,7 @@ It doesn't just *drive* your site — it **improves** it, safely. Point it at an
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>36 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>38 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -91,7 +91,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 36 tools
+## 🛠️ The 38 tools
 
 ### Edge Delivery Services — publish, content, analytics
 
@@ -172,20 +172,26 @@ Nine tools reach a site's Document Authoring source directly (`admin.da.live`), 
 
 - `eds_audit_page`
 - `eds_audit_site`
+- `eds_audit_report`
 
 > **It tells you what's wrong.** `eds_audit_site` sweeps the whole site (or a subtree) and returns a **prioritized** list of issues across **SEO** (missing titles/descriptions, no H1, blocked from indexing), **accessibility** (images without alt text, missing landmarks, unlabeled form inputs), **freshness** (pages not updated in over a year), **sitemap coverage**, and — with a `domain` — **performance** (Core Web Vitals) and **404s** from Adobe's own real-user data. `eds_audit_page` does the same for one page. Read-only and safe to run anytime.
+>
+> **`eds_audit_report`** turns that audit into a **beautiful, shareable HTML report** — per-dimension health scores, a prioritized issue list, and each suggested fix — self-contained (no external assets), ready to open, host, or send to a stakeholder.
 
 ### Safe fixes — repair what the audit finds
 
 - `eds_fix_metadata`
 - `eds_bulk_fix_metadata`
 - `eds_fix_redirect`
+- `eds_fix_audit`
 
 > **It fixes what it finds — reversibly.** `eds_fix_metadata` repairs a page's title, meta description and Open Graph image by editing its Document Authoring source, routed through the same **dry-run + undo** path as the write tools. The agent supplies the content (e.g. writes a fitting description); the tool writes it *correctly and idempotently* (merges into the page's Metadata block, never duplicates it). Pass `publish: true` to preview + publish so the change goes live.
 >
 > **`eds_bulk_fix_metadata`** does it across a **whole site in one reversible operation** — pass a list of `{ path, metadata }`, and it writes every changed page in a single batch that returns **one** undo reverting all of it. The full loop: **`eds_audit_site` → fix the batch → publish → re-audit to zero** — with a single undo if anything looks off.
 >
 > **`eds_fix_redirect`** closes the 404 loop: `eds_audit_site` surfaces the broken links from real-user data, and this adds the **301 redirect rules** (to the site's `redirects` sheet) that fix them — one rule or many, idempotent, dry-run + undo. So the audit now has a fix for *every* major finding.
+>
+> **`eds_fix_audit`** is the "fix it" button in agent form: after an audit, apply its fixable findings — metadata **and** redirects together — in **one reversible batch**. Findings the report marks **✦ Fixable** carry a machine-readable fix; you supply the values (the tool never invents copy), and every change is pushed at once so a **single** `eds_da_rollback` undoes all of it. `dryRun` previews the whole plan; `publish: true` makes it live.
 
 ---
 
