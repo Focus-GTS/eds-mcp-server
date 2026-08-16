@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-08-16
+
+### Fixed
+- **README banner** — the `hero.svg` header now reads "40 tools" (was 37) and adds
+  `track` to the capability line (`Read · audit · track · fix · publish · undo`).
+  Docs-only; no code changes.
+
 ## [0.13.0] - 2026-08-16
 
 ### Added
