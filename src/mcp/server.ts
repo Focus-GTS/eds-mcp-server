@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 38 tools registered.
+ * Creates a {@link McpServer} instance with all 40 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -588,6 +588,39 @@ export function createServer(options: EdsClientOptions): McpServer {
         site,
         args as Parameters<typeof auditHandlers.handleAuditReport>[2],
       );
+    },
+  );
+
+  server.tool(
+    'eds_audit_snapshot',
+    "Run the site audit and RECORD its scores to a history sheet in the site's own Document Authoring content (default /audit-history.json, kept private/unpublished), so health can be tracked over time. Returns the overall score AND the change since the last snapshot (e.g. \"89, ▲7 vs 2026-08-09\"). One row per day — a same-day re-run updates that day's row. dryRun previews the row; publish:true makes the sheet live. Requires EDS_DA_TOKEN. Pair with eds_audit_trend to see the line. Same audit options as eds_audit_site.",
+    {
+      historyPath: z.string().optional().describe('DA path for the history sheet (default /audit-history.json).'),
+      pathPrefix: z.string().optional().describe('Only audit pages under this path prefix. Omit for the whole site.'),
+      maxPages: z.number().int().positive().max(1000).optional().describe('Max pages to fetch for per-page checks (default 50).'),
+      dimensions: z
+        .array(z.enum(ALL_DIMENSIONS as [string, ...string[]]))
+        .optional()
+        .describe(`Which dimensions to run (default all): ${ALL_DIMENSIONS.join(', ')}.`),
+      domain: z.string().optional().describe('Live domain for RUM-based performance and 404 checks (needs EDS_DOMAIN_KEY).'),
+      days: z.number().int().positive().max(365).optional().describe('RUM look-back window in days (default 7).'),
+      dryRun: z.boolean().optional().describe('Preview the row without writing (recommended first pass).'),
+      publish: z.boolean().optional().describe('Preview + publish the history sheet so it is live (default: kept private in DA).'),
+    },
+    async (args) =>
+      auditHandlers.handleAuditSnapshot(daClient, client, args as Parameters<typeof auditHandlers.handleAuditSnapshot>[2]),
+  );
+
+  server.tool(
+    'eds_audit_trend',
+    "Show site health OVER TIME from the recorded snapshots — returns a self-contained, theme-aware HTML trend view (an SVG sparkline of the overall score plus per-dimension movement since the last snapshot), ready to save or share. Reads the history sheet written by eds_audit_snapshot. Pass format:'text' for a short plain-text summary instead of HTML. Requires EDS_DA_TOKEN. Read-only.",
+    {
+      historyPath: z.string().optional().describe('DA path for the history sheet (default /audit-history.json).'),
+      format: z.enum(['html', 'text']).optional().describe("'html' (default) returns a shareable trend page; 'text' returns a short summary."),
+    },
+    async (args) => {
+      const site = options.owner && options.repo ? `${options.owner}/${options.repo}` : 'this site';
+      return auditHandlers.handleAuditTrend(daClient, site, args as Parameters<typeof auditHandlers.handleAuditTrend>[2]);
     },
   );
 

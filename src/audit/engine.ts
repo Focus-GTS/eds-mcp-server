@@ -217,7 +217,15 @@ export interface AuditSiteOptions {
   days?: number;
 }
 
-function summarize(scope: AuditReport['scope'], target: string, findings: AuditFinding[], skipped: string[], truncated: boolean, pagesAudited?: number): AuditReport {
+function summarize(
+  scope: AuditReport['scope'],
+  target: string,
+  findings: AuditFinding[],
+  skipped: string[],
+  dimensions: AuditDimension[],
+  truncated: boolean,
+  pagesAudited?: number,
+): AuditReport {
   const sorted = sortFindings(findings);
   return {
     scope,
@@ -231,6 +239,7 @@ function summarize(scope: AuditReport['scope'], target: string, findings: AuditF
       ...(pagesAudited !== undefined ? { pagesAudited } : {}),
     },
     skipped,
+    dimensions,
     truncated,
   };
 }
@@ -343,10 +352,12 @@ export async function auditSite(
   }
 
   const target = options.pathPrefix ? options.pathPrefix : '(whole site)';
-  return summarize('site', target, findings, skipped, truncated, wantsPageChecks ? toAudit.length : 0);
+  const attempted = ALL_DIMENSIONS.filter((d) => dims.has(d));
+  return summarize('site', target, findings, skipped, attempted, truncated, wantsPageChecks ? toAudit.length : 0);
 }
 
 /** Audit a single page from its HTML. */
 export function auditSinglePage(html: string, path: string): AuditReport {
-  return summarize('page', path, auditPage(html, path), [], false);
+  // A single page runs only the HTML-based checks — SEO + accessibility.
+  return summarize('page', path, auditPage(html, path), [], ['seo', 'accessibility'], false);
 }

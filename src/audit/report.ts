@@ -10,6 +10,7 @@
  */
 
 import { ALL_DIMENSIONS, type AuditDimension, type AuditFinding, type AuditReport } from './types.js';
+import { grade, scoreClass, scoreDimension } from './score.js';
 
 const DIMENSION_LABELS: Record<AuditDimension, string> = {
   seo: 'SEO',
@@ -32,31 +33,8 @@ const DIMENSION_TIPS: Record<AuditDimension, string> = {
 
 const SEVERITY_ORDER: Record<AuditFinding['severity'], number> = { critical: 0, warning: 1, info: 2 };
 
-function grade(score: number): string {
-  if (score >= 95) return 'A+';
-  if (score >= 85) return 'A';
-  if (score >= 70) return 'B';
-  if (score >= 55) return 'C';
-  if (score >= 40) return 'D';
-  return 'F';
-}
-
-/** Health score for a dimension, derived from its findings, normalized by pages. */
-function scoreDimension(findings: AuditFinding[], pages: number): number {
-  const weighted = findings.reduce(
-    (s, f) => s + (f.severity === 'critical' ? 3 : f.severity === 'warning' ? 1 : 0.25),
-    0,
-  );
-  const perPage = weighted / Math.max(1, pages);
-  return Math.max(0, Math.min(100, Math.round(100 - perPage * 10)));
-}
-
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function scoreClass(score: number): string {
-  return score >= 85 ? 'good' : score >= 55 ? 'fair' : 'poor';
 }
 
 /** Inline SVG ring gauge. Colors/type come from CSS classes so it stays theme-aware. */
@@ -202,9 +180,13 @@ export function generateReport(
   meta: { site: string; generatedAt: string },
 ): string {
   const pages = report.summary.pagesAudited ?? 1;
-  const skippedDims = new Set(ALL_DIMENSIONS.filter((d) => report.skipped.some((s) => s.startsWith(d))));
+  // Only card the dimensions the audit ATTEMPTED — a dimension excluded by the
+  // `dimensions` filter is neither scored nor shown (never a fake 100). Fall back
+  // to all dimensions for older reports without the field.
+  const attempted = report.dimensions ?? ALL_DIMENSIONS;
+  const skippedDims = new Set(attempted.filter((d) => report.skipped.some((s) => s.startsWith(d))));
 
-  const perDim = ALL_DIMENSIONS.map((dim) => {
+  const perDim = attempted.map((dim) => {
     const findings = report.findings.filter((f) => f.dimension === dim);
     if (skippedDims.has(dim)) return { dim, skipped: true as const, score: 0, findings };
     return { dim, skipped: false as const, score: scoreDimension(findings, pages), findings };

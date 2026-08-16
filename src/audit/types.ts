@@ -116,6 +116,12 @@ export interface AuditReport {
   };
   /** Dimensions that could not run (e.g. RUM without a domain key), never silent. */
   skipped: string[];
+  /**
+   * The dimensions this audit ATTEMPTED (the requested set — all by default, or
+   * the `dimensions` filter). Scoring covers only these minus `skipped`; a
+   * dimension not attempted is neither scored nor shown, never a fake 100.
+   */
+  dimensions: AuditDimension[];
   /** True when the sweep hit the page cap and some pages were not audited. */
   truncated: boolean;
 }

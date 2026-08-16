@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Track it — site health over time** (ADR-016). Two tools turn the one-off audit
+  into a trend:
+  - `eds_audit_snapshot` — run the site audit and record its scores (overall +
+    per-dimension + counts) as a row in a **history sheet in the site's own
+    Document Authoring content** (default `/audit-history.json`, kept **private /
+    unpublished** by default — scores stay yours). One row per day (a same-day
+    re-run updates it; idempotent when nothing changed). Returns the change since
+    the last snapshot (e.g. "89, ▲7 vs 2026-08-09"). `dryRun` previews the row;
+    `publish:true` makes the sheet live. Requires `EDS_DA_TOKEN`.
+  - `eds_audit_trend` — read that history and return a **self-contained,
+    theme-aware HTML trend view**: an SVG sparkline of the overall score over time
+    plus per-dimension movement since the last snapshot. `format:'text'` returns a
+    short summary instead. Read-only.
+  - Health scoring is now shared (`src/audit/score.ts` `computeScores`) so the
+    report, snapshot, and trend always agree. History stored as an EDS sheet, read
+    defensively (same discipline as the redirects sheet). 40 tools total.
+
 ## [0.12.0] - 2026-08-16
 
 ### Added

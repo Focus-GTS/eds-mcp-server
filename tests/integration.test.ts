@@ -55,14 +55,14 @@ describe.skipIf(!LIVE)('Integration: Admin API (read-only, no auth)', () => {
 });
 
 describe('Integration: MCP Server creation', () => {
-  it('creates a server with all 38 tools registered', async () => {
+  it('creates a server with all 40 tools registered', async () => {
     const { createServer } = await import('../src/mcp/server.js');
     const server = createServer({ owner: 'adobe', repo: 'helix-website' });
     expect(server).toBeDefined();
     // Assert the real registered-tool count so the tool-count claim can't drift.
     const registered = (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
     const names = Object.keys(registered);
-    expect(names).toHaveLength(38);
+    expect(names).toHaveLength(40);
     // Spot-check that the EDS, DA, audit, and fix tool families are all present.
     expect(names).toContain('eds_publish_page');
     expect(names).toContain('eds_bulk_publish');
