@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 37 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 38 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 37 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 38 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -128,12 +128,15 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_fix_metadata` | Fix a page's title/description/OG image via its DA Metadata block (dry-run + undo, optional publish) |
 | `eds_bulk_fix_metadata` | Fix metadata across many pages in one batch with a single aggregated undo (dry-run + optional publish) |
 | `eds_fix_redirect` | Add/update 301 redirect rules in the site's `redirects` sheet to fix 404s (dry-run + undo, optional publish) |
+| `eds_fix_audit` | Apply the audit's fixable findings — metadata AND redirects — in one reversible batch with a single aggregated undo (dry-run + optional publish) |
 
 DA tools (`eds_da_*`) access the authored source directly via `admin.da.live` (adopted from `adobe-rnd/da-mcp`, per ADR-007). `eds_da_export`/`eds_da_push` are the bulk "clone" model (ADR-008) — the efficiency of `aem content clone` for agents, no local checkout. They require `EDS_DA_TOKEN`; DA client code lives in `src/da-admin/`.
 
 **Safe writes (ADR-009).** `eds_da_push` is safe by default: pass `dryRun: true` to preview exactly what would change (create / update / unchanged, with line-diff counts) and write nothing, or `withUndo: true` to capture the prior state and get back an `undo` object. Feed that object to `eds_da_rollback` to reverse the push — restoring updated docs to their prior content and deleting the ones the push created. This is what makes pointing the server at a production site trustworthy: preview before writing, undo after.
 
 **Redirect fixes (ADR-013).** `eds_fix_redirect` adds/updates 301 redirect rules in the site's `redirects` sheet (a single document at the root whose table's first row is `Source`/`Destination` column names — grounded in Adobe's spreadsheets doc; the redirect sheet is the canonical example). Reads the existing `/redirects` DA doc (or creates it), updates a rule for a matching Source or appends a new row — preserving headers and any extra columns (no data loss), idempotent — through the safe-writes path (dry-run + undo + optional publish). All rules live in ONE sheet, so one tool handles single or bulk. Closes the 404 loop (audit finds 404s → this fixes them). Reader/writer in `src/fix/redirects.ts`.
+
+**Fix-from-audit (ADR-015).** `eds_fix_audit` closes the audit→fix loop: findings now carry a stable `code` and, where a shipped writer can repair them, a `fix` descriptor (SEO title/description → `eds_fix_metadata`; broken-link 404s → `eds_fix_redirect`). The tool takes agent-supplied `metadata` fixes and/or `redirects` and pushes every changed doc (metadata pages + `/redirects.json`) in a SINGLE `withUndo` push, so one `eds_da_rollback` reverses the whole mixed batch. It never fabricates copy — the agent supplies every value. Pure orchestration over ADR-011/013 (no new write logic). The report (ADR-014) marks fixable findings with a "✦ Fixable" chip and an honest "N of M can be fixed in place" lead. Handler in `src/mcp/fix-handlers.ts` (`handleFixAudit`).
 
 **Bulk fixes (ADR-012).** `eds_bulk_fix_metadata` applies per-page metadata fixes across many pages (`pages: [{path, metadata}]`) in one call: reuses the ADR-011 writer, pushes all changed pages in a single `eds_da_push withUndo` so the result carries **one** undo that reverts the whole batch, with optional `publish` (bounded-concurrency preview+publish). Partial-failure tolerant (unreadable pages recorded, never abort). Handler in `src/mcp/fix-handlers.ts`.
 

@@ -321,3 +321,182 @@ export async function handleFixRedirect(
     return errorResult(error);
   }
 }
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Apply the fixes an audit surfaced, across mixed types, in ONE reversible
+ * operation (ADR-015). Takes agent-supplied metadata fixes and/or redirect rules
+ * — the values the agent wrote from the findings (the tool never invents copy) —
+ * and pushes every changed document (metadata pages + the redirects sheet) in a
+ * single `withUndo` push, so ONE `eds_da_rollback` reverses the entire batch.
+ * Pure orchestration over the ADR-011/013 transforms; no new write logic.
+ */
+export async function handleFixAudit(
+  daClient: DaClient,
+  edsClient: EdsClient,
+  args: {
+    metadata?: Array<{ path: string; metadata: MetadataFields }>;
+    redirects?: RedirectRule[];
+    dryRun?: boolean;
+    publish?: boolean;
+  },
+) {
+  try {
+    const metaInput = args.metadata ?? [];
+    const redirectInput = args.redirects ?? [];
+    if (metaInput.length === 0 && redirectInput.length === 0) {
+      return errorResult(
+        new Error(
+          'Nothing to fix — supply `metadata` fixes and/or `redirects`. These are the audit findings that carry a `fix`; the agent provides the values (this tool never invents copy).',
+        ),
+      );
+    }
+
+    // 1. Metadata — dedupe+merge by DA-normalized path (same discipline as
+    //    bulk-fix, so two entries for one page can't race on write), then
+    //    read+transform each. Read failures are recorded, never abort the batch.
+    const deduped = new Map<string, { path: string; metadata: MetadataFields }>();
+    for (const p of metaInput) {
+      const key = p.path.replace(/^\/+/, '').replace(/\.html$/i, '');
+      const existing = deduped.get(key);
+      if (existing) existing.metadata = { ...existing.metadata, ...p.metadata };
+      else deduped.set(key, { path: p.path, metadata: { ...p.metadata } });
+    }
+    const pages = [...deduped.values()];
+
+    const plans: Array<{ path: string; sourcePath: string; contentType?: string; html: string; fields: string[] }> = [];
+    const readFailed: Array<{ path: string; error: string }> = [];
+    await mapWithConcurrency(
+      pages,
+      async (p) => {
+        try {
+          const source = await daClient.getSource(p.path);
+          const { html, changes } = applyMetadata(source.content, p.metadata);
+          if (changes.length > 0) {
+            plans.push({ path: p.path, sourcePath: source.path, contentType: source.contentType, html, fields: changes.map((c) => c.field) });
+          }
+        } catch (e) {
+          readFailed.push({ path: p.path, error: errMsg(e) });
+        }
+      },
+      6,
+    );
+    const metaUnchanged = pages.length - plans.length - readFailed.length;
+
+    // 2. Redirects — read the existing sheet and apply the rules.
+    let redirectDoc: { content: string; count: number; existed: boolean } | null = null;
+    if (redirectInput.length > 0) {
+      const existing = await getSourceOrNull(daClient, '/redirects.json');
+      let applied;
+      try {
+        applied = applyRedirects(existing?.content ?? null, redirectInput);
+      } catch (e) {
+        return errorResult(e); // unrecognizable / multi-sheet existing doc
+      }
+      if (applied.changes.length > 0) {
+        redirectDoc = { content: applied.content, count: applied.changes.length, existed: !!existing };
+      }
+    }
+
+    // 3. Dry run — the full combined plan, no writes.
+    if (args.dryRun) {
+      const lines = [
+        `Dry run — nothing written. Would change ${plans.length} page(s) and ${redirectDoc ? redirectDoc.count : 0} redirect rule(s); ${metaUnchanged} page(s) already correct; ${readFailed.length} unreadable.`,
+      ];
+      if (plans.length > 0) {
+        lines.push('', 'Metadata:');
+        for (const pl of plans) lines.push(`  ${pl.sourcePath}: ${pl.fields.join(', ')}`);
+      }
+      if (redirectDoc) {
+        lines.push('', `Redirects (${redirectDoc.existed ? 'update' : 'create'} /redirects.json): ${redirectDoc.count} rule(s).`);
+      }
+      if (readFailed.length > 0) {
+        lines.push('', 'Could not read:');
+        for (const f of readFailed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+      }
+      return textResult(lines.join('\n'));
+    }
+
+    // Nothing actually changes.
+    if (plans.length === 0 && !redirectDoc) {
+      if (readFailed.length > 0) {
+        const lines = [`Nothing written — ${readFailed.length} page(s) could not be read; ${metaUnchanged} already correct.`, '', 'Could not read:'];
+        for (const f of readFailed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+        return textResult(lines.join('\n'));
+      }
+      return textResult('No changes needed — everything the audit flagged is already correct.');
+    }
+
+    // 4. Push EVERYTHING in one batch → a single unified undo across mixed types.
+    const docs = plans.map((pl) => ({ path: pl.sourcePath, content: pl.html, contentType: pl.contentType }));
+    if (redirectDoc) docs.push({ path: '/redirects.json', content: redirectDoc.content, contentType: 'application/json' });
+    const result = await daClient.pushDocuments(docs, { withUndo: true });
+
+    // Report what ACTUALLY got written, not what was planned — a partial write
+    // failure (e.g. one page 403s) must never read as success.
+    const written = new Set(result.succeeded);
+    const pagesFixed = plans.filter((pl) => written.has(pl.sourcePath)).length;
+    const redirectsFixed = redirectDoc && written.has('/redirects.json') ? redirectDoc.count : 0;
+
+    const lines = [
+      `Fixed ${pagesFixed} page(s)${redirectsFixed ? ` and ${redirectsFixed} redirect rule(s)` : ''} in one reversible batch; ${result.failed.length} write failure(s); ${metaUnchanged} page(s) already correct; ${readFailed.length} unreadable.`,
+    ];
+
+    // 5. Optionally publish everything that was written.
+    if (args.publish && result.succeeded.length > 0) {
+      const toPublish = plans.filter((pl) => written.has(pl.sourcePath)).map((pl) => pl.path);
+      if (redirectDoc && written.has('/redirects.json')) toPublish.push('/redirects.json');
+      let published = 0;
+      const pubFailed: string[] = [];
+      await mapWithConcurrency(
+        toPublish,
+        async (path) => {
+          try {
+            await edsClient.previewAndPublish(path);
+            published++;
+          } catch {
+            pubFailed.push(path);
+          }
+        },
+        6,
+      );
+      lines.push(`Published ${published}/${toPublish.length} live${pubFailed.length ? ` (${pubFailed.length} publish failure(s))` : ''}.`);
+    } else if (result.succeeded.length > 0) {
+      lines.push('(Written to DA. Pass publish:true to make the batch live.)');
+    }
+
+    if (readFailed.length > 0) {
+      lines.push('', 'Could not read:');
+      for (const f of readFailed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+    }
+    if (result.failed.length > 0) {
+      lines.push('', 'Write failures:');
+      for (const f of result.failed) lines.push(`  ✗ ${f.path} — ${f.error}`);
+    }
+
+    // One aggregated undo for the whole batch (metadata + redirects), capped so a
+    // huge batch's undo isn't inlined unusably (DA versions each doc as a fallback).
+    if (result.undo && (result.undo.restore.length > 0 || result.undo.remove.length > 0)) {
+      const undoJson = JSON.stringify({ undo: result.undo });
+      if (undoJson.length <= 200_000) {
+        lines.push('', 'To undo this ENTIRE batch in one call, use eds_da_rollback with:', undoJson);
+        // eds_da_rollback restores the DA *source* but does not republish. If this
+        // batch went live, the old (now-wrong) version keeps serving until the
+        // reverted docs are republished — critical for a redirect, which hides a
+        // live page. Say so, honestly.
+        if (args.publish) {
+          lines.push(
+            '',
+            'Note: this batch was published. eds_da_rollback restores the source but does NOT republish — after rolling back, republish the affected paths (including /redirects.json) so the revert goes live.',
+          );
+        }
+      } else {
+        lines.push('', `(This batch's undo is ${Math.round(undoJson.length / 1024)} KB — too large to return inline. Run smaller batches; DA also versions every doc for per-doc revert.)`);
+      }
+    }
+    return textResult(lines.join('\n'));
+  } catch (error) {
+    return errorResult(error);
+  }
+}

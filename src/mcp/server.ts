@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 37 tools registered.
+ * Creates a {@link McpServer} instance with all 38 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -690,6 +690,54 @@ export function createServer(options: EdsClientOptions): McpServer {
         dryRun: args.dryRun,
         publish: args.publish,
       }),
+  );
+
+  server.tool(
+    'eds_fix_audit',
+    "Fix what the audit found — across metadata AND redirects — in ONE reversible operation. After eds_audit_site/eds_audit_report, findings that carry a `fix` are repairable here: pass `metadata` fixes (per page) and/or `redirects` ({ source, destination }) with the values YOU wrote from the findings — this tool never invents copy. Everything is pushed in a single batch, so ONE eds_da_rollback undoes the whole thing. dryRun previews the combined plan; publish:true makes it live. Requires EDS_DA_TOKEN. This is the 'Fix it' button in agent form: audit → you supply values → one safe, reversible apply.",
+    {
+      metadata: z
+        .array(
+          z.object({
+            path: edsPath.describe('Site-relative page path to fix'),
+            metadata: z
+              .object({
+                title: z.string().optional(),
+                description: z.string().optional(),
+                image: z.string().optional(),
+                imageAlt: z.string().optional(),
+              })
+              .describe('Metadata values to set on this page (only provided ones change)'),
+          }),
+        )
+        .max(500)
+        .optional()
+        .describe('Per-page metadata fixes for SEO title/description/OG-image findings'),
+      redirects: z
+        .array(
+          z.object({
+            source: z.string().min(1).describe('The 404 path that should redirect (relative, e.g. /old-page)'),
+            destination: z.string().min(1).describe('Where it should go — a relative path or a full URL'),
+          }),
+        )
+        .max(500)
+        .optional()
+        .describe('Redirect rules for broken-link (404) findings'),
+      dryRun: z.boolean().optional().describe('Preview the combined plan without writing (recommended first pass)'),
+      publish: z.boolean().optional().describe('Preview + publish everything written so the fixes go live'),
+    },
+    async (args) => {
+      const metadata = args.metadata?.map((p) => {
+        const { imageAlt, ...rest } = p.metadata;
+        return { path: p.path, metadata: { ...rest, ...(imageAlt !== undefined ? { 'image-alt': imageAlt } : {}) } };
+      });
+      return fixHandlers.handleFixAudit(daClient, client, {
+        metadata,
+        redirects: args.redirects,
+        dryRun: args.dryRun,
+        publish: args.publish,
+      });
+    },
   );
 
   return server;

@@ -32,6 +32,7 @@ function checkImageAltText(html: string): AuditFinding | null {
   return {
     dimension: 'accessibility',
     // A majority of images with no alt attribute is a real barrier; a few is a warning.
+    code: 'a11y-missing-alt',
     severity: ratio > 0.5 ? 'critical' : 'warning',
     title: 'Images missing an alt attribute',
     detail: `${missing} of ${images.length} images have no alt attribute at all.`,
@@ -48,6 +49,7 @@ function checkHeadingHierarchy(html: string): AuditFinding | null {
   if (levels.length === 0) {
     return {
       dimension: 'accessibility',
+      code: 'a11y-no-headings',
       severity: 'warning',
       title: 'No headings on the page',
       detail: 'The page has no heading elements to structure its content.',
@@ -62,6 +64,7 @@ function checkHeadingHierarchy(html: string): AuditFinding | null {
   if (skips === 0) return null;
   return {
     dimension: 'accessibility',
+    code: 'a11y-heading-skip',
     severity: skips > 2 ? 'warning' : 'info',
     title: 'Heading levels skip',
     detail: `Found ${skips} heading-level skip(s) across ${levels.length} headings (e.g. h1 → h3).`,
@@ -83,6 +86,7 @@ function checkLinkText(html: string): AuditFinding | null {
   if (total === 0 || generic === 0) return null;
   return {
     dimension: 'accessibility',
+    code: 'a11y-vague-link-text',
     severity: 'info',
     title: 'Non-descriptive link text',
     detail: `${generic} of ${total} links use generic text (e.g. "click here", "read more").`,
@@ -109,6 +113,7 @@ function checkAriaLandmarks(html: string): AuditFinding | null {
   if (!hasFooter) missing.push('footer');
   return {
     dimension: 'accessibility',
+    code: 'a11y-missing-landmarks',
     severity: found === 0 ? 'warning' : 'info',
     title: 'Missing landmark regions',
     detail: `Missing landmark region(s): ${missing.join(', ')}.`,
@@ -154,6 +159,7 @@ function checkFormLabels(html: string): AuditFinding | null {
   const ratio = unlabeled / controls.length;
   return {
     dimension: 'accessibility',
+    code: 'a11y-unlabeled-inputs',
     severity: ratio > 0.5 ? 'critical' : 'warning',
     title: 'Form inputs missing labels',
     detail: `${unlabeled} of ${controls.length} form inputs have no associated label.`,

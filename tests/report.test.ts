@@ -9,9 +9,9 @@ function makeReport(over: Partial<AuditReport> = {}): AuditReport {
     scope: 'site',
     target: '(whole site)',
     findings: [
-      { dimension: 'seo', severity: 'critical', title: 'Missing meta description', detail: 'no desc', suggestion: 'Add a 120–160 char description.', page: '/a' },
-      { dimension: 'seo', severity: 'critical', title: 'Missing meta description', detail: 'no desc', suggestion: 'Add a 120–160 char description.', page: '/b' },
-      { dimension: 'accessibility', severity: 'warning', title: 'Missing landmark regions', detail: 'no main', page: '/a' },
+      { dimension: 'seo', code: 'seo-missing-description', severity: 'critical', title: 'Missing meta description', detail: 'no desc', suggestion: 'Add a 120–160 char description.', page: '/a', fix: { tool: 'eds_fix_metadata', field: 'description' } },
+      { dimension: 'seo', code: 'seo-missing-description', severity: 'critical', title: 'Missing meta description', detail: 'no desc', suggestion: 'Add a 120–160 char description.', page: '/b', fix: { tool: 'eds_fix_metadata', field: 'description' } },
+      { dimension: 'accessibility', code: 'a11y-missing-landmarks', severity: 'warning', title: 'Missing landmark regions', detail: 'no main', page: '/a' },
     ],
     summary: { critical: 2, warning: 1, info: 0, total: 3, pagesAudited: 5 },
     skipped: ['performance (needs a domain)', 'links/404s (needs a domain)'],
@@ -60,6 +60,24 @@ describe('generateReport', () => {
     expect(html).toMatch(/class="arc (good|fair|poor)"/);
   });
 
+  it('marks fixable findings and points at eds_fix_audit (ADR-015)', () => {
+    const html = generateReport(makeReport(), META);
+    // The missing-description group carries a fix → a "Fixable" chip + the lead.
+    expect(html).toContain('Fixable');
+    expect(html).toContain('eds_fix_audit');
+    expect(html).toContain('can be fixed in place');
+  });
+
+  it('does not claim fixability when no finding carries a fix', () => {
+    const noFix = makeReport({
+      findings: [{ dimension: 'accessibility', code: 'a11y-missing-landmarks', severity: 'warning', title: 'Missing landmark regions', detail: 'no main', page: '/a' }],
+      summary: { critical: 0, warning: 1, info: 0, total: 1, pagesAudited: 1 },
+    });
+    const html = generateReport(noFix, META);
+    expect(html).not.toContain('Fixable');
+    expect(html).not.toContain('can be fixed in place');
+  });
+
   it('renders a clean report when there are no findings', () => {
     const clean = makeReport({ findings: [], summary: { critical: 0, warning: 0, info: 0, total: 0, pagesAudited: 3 }, skipped: [] });
     const html = generateReport(clean, META);
@@ -68,7 +86,7 @@ describe('generateReport', () => {
 
   it('escapes HTML in finding content', () => {
     const evil = makeReport({
-      findings: [{ dimension: 'seo', severity: 'warning', title: 'Weird <script> title', detail: 'x', suggestion: 'a & b', page: '/<x>' }],
+      findings: [{ dimension: 'seo', code: 'seo-title-length', severity: 'warning', title: 'Weird <script> title', detail: 'x', suggestion: 'a & b', page: '/<x>' }],
       summary: { critical: 0, warning: 1, info: 0, total: 1, pagesAudited: 1 },
     });
     const html = generateReport(evil, META);
