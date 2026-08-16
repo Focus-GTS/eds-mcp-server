@@ -59,12 +59,12 @@
   <!-- wordmark -->
   <text x="64" y="120" font-family="Helvetica, Arial, sans-serif" font-size="60" font-weight="700" letter-spacing="1" fill="#ffffff">EDS MCP Server</text>
   <text x="66" y="166" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#cdd9f0">Run and improve your Edge Delivery site</text>
-  <text x="66" y="200" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#7f90b4">Read &#183; audit &#183; fix &#183; publish &#183; undo &#8212; from any AI agent</text>
+  <text x="66" y="200" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#7f90b4">Read &#183; audit &#183; track &#183; fix &#183; publish &#183; undo &#8212; from any AI agent</text>
 
   <!-- stat chips -->
   <g font-family="Helvetica, Arial, sans-serif">
     <rect x="64" y="248" width="150" height="60" rx="10" fill="#101c36" stroke="#273a63" stroke-width="1.5"/>
-    <text x="139" y="278" text-anchor="middle" font-size="26" fill="#ffffff" font-weight="700">37</text>
+    <text x="139" y="278" text-anchor="middle" font-size="26" fill="#ffffff" font-weight="700">40</text>
     <text x="139" y="298" text-anchor="middle" font-size="12" fill="#7f90b4">tools</text>
 
     <rect x="226" y="248" width="210" height="60" rx="10" fill="#101c36" stroke="#273a63" stroke-width="1.5"/>
