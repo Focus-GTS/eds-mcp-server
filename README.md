@@ -10,7 +10,7 @@
 
 ### Let an AI agent run — and *improve* — your Adobe Edge Delivery site.
 
-**38 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**40 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 **Read your content → audit it → fix what's wrong → publish → undo any of it.**
@@ -56,7 +56,7 @@ It doesn't just *drive* your site — it **improves** it, safely. Point it at an
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>38 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>40 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -91,7 +91,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 38 tools
+## 🛠️ The 40 tools
 
 ### Edge Delivery Services — publish, content, analytics
 
@@ -173,10 +173,14 @@ Nine tools reach a site's Document Authoring source directly (`admin.da.live`), 
 - `eds_audit_page`
 - `eds_audit_site`
 - `eds_audit_report`
+- `eds_audit_snapshot`
+- `eds_audit_trend`
 
 > **It tells you what's wrong.** `eds_audit_site` sweeps the whole site (or a subtree) and returns a **prioritized** list of issues across **SEO** (missing titles/descriptions, no H1, blocked from indexing), **accessibility** (images without alt text, missing landmarks, unlabeled form inputs), **freshness** (pages not updated in over a year), **sitemap coverage**, and — with a `domain` — **performance** (Core Web Vitals) and **404s** from Adobe's own real-user data. `eds_audit_page` does the same for one page. Read-only and safe to run anytime.
 >
 > **`eds_audit_report`** turns that audit into a **beautiful, shareable HTML report** — per-dimension health scores, a prioritized issue list, and each suggested fix — self-contained (no external assets), ready to open, host, or send to a stakeholder.
+>
+> **Track it over time.** `eds_audit_snapshot` records each audit's scores to a history sheet in your site's own content (private by default) and tells you the change since last time — *"89, ▲7 since last week."* **`eds_audit_trend`** turns that history into a shareable HTML **sparkline** of your score over time plus per-dimension movement. One snapshot is a mirror; the trend is the story.
 
 ### Safe fixes — repair what the audit finds
 

@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 38 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 40 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 38 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 40 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -125,6 +125,8 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_audit_page` | Audit one page for SEO + accessibility issues (prioritized findings) |
 | `eds_audit_site` | Sweep the site for SEO, accessibility, freshness, sitemap, performance (RUM) + 404 issues |
 | `eds_audit_report` | Run the site audit and return a beautiful, self-contained, shareable HTML site-health report |
+| `eds_audit_snapshot` | Run the audit and record its scores to a history sheet in the site's DA (track health over time; returns change since last snapshot) |
+| `eds_audit_trend` | Show site health over time — a self-contained HTML sparkline + per-dimension movement from the recorded snapshots |
 | `eds_fix_metadata` | Fix a page's title/description/OG image via its DA Metadata block (dry-run + undo, optional publish) |
 | `eds_bulk_fix_metadata` | Fix metadata across many pages in one batch with a single aggregated undo (dry-run + optional publish) |
 | `eds_fix_redirect` | Add/update 301 redirect rules in the site's `redirects` sheet to fix 404s (dry-run + undo, optional publish) |
@@ -135,6 +137,8 @@ DA tools (`eds_da_*`) access the authored source directly via `admin.da.live` (a
 **Safe writes (ADR-009).** `eds_da_push` is safe by default: pass `dryRun: true` to preview exactly what would change (create / update / unchanged, with line-diff counts) and write nothing, or `withUndo: true` to capture the prior state and get back an `undo` object. Feed that object to `eds_da_rollback` to reverse the push — restoring updated docs to their prior content and deleting the ones the push created. This is what makes pointing the server at a production site trustworthy: preview before writing, undo after.
 
 **Redirect fixes (ADR-013).** `eds_fix_redirect` adds/updates 301 redirect rules in the site's `redirects` sheet (a single document at the root whose table's first row is `Source`/`Destination` column names — grounded in Adobe's spreadsheets doc; the redirect sheet is the canonical example). Reads the existing `/redirects` DA doc (or creates it), updates a rule for a matching Source or appends a new row — preserving headers and any extra columns (no data loss), idempotent — through the safe-writes path (dry-run + undo + optional publish). All rules live in ONE sheet, so one tool handles single or bulk. Closes the 404 loop (audit finds 404s → this fixes them). Reader/writer in `src/fix/redirects.ts`.
+
+**Track-it — health over time (ADR-016).** `eds_audit_snapshot` runs the audit and records its scores (overall + per-dimension + counts) as a row in a JSON **history sheet in the site's own DA** (default `/audit-history.json`, kept private/unpublished by default). One row per day (same-day re-run updates it, idempotent), returns the change vs the last snapshot. `eds_audit_trend` reads that sheet and returns a self-contained HTML trend view (SVG sparkline + per-dimension movement), or `format:'text'` for a summary. Scoring is shared via `src/audit/score.ts` (`computeScores`) so the report, snapshot, and trend never disagree. Sheet reader/writer in `src/audit/history.ts` (same defensive discipline as redirects); view in `src/audit/trend.ts`; handlers in `src/mcp/audit-handlers.ts`. Requires EDS_DA_TOKEN (writes the sheet).
 
 **Fix-from-audit (ADR-015).** `eds_fix_audit` closes the audit→fix loop: findings now carry a stable `code` and, where a shipped writer can repair them, a `fix` descriptor (SEO title/description → `eds_fix_metadata`; broken-link 404s → `eds_fix_redirect`). The tool takes agent-supplied `metadata` fixes and/or `redirects` and pushes every changed doc (metadata pages + `/redirects.json`) in a SINGLE `withUndo` push, so one `eds_da_rollback` reverses the whole mixed batch. It never fabricates copy — the agent supplies every value. Pure orchestration over ADR-011/013 (no new write logic). The report (ADR-014) marks fixable findings with a "✦ Fixable" chip and an honest "N of M can be fixed in place" lead. Handler in `src/mcp/fix-handlers.ts` (`handleFixAudit`).
 
