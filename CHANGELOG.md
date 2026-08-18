@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Every report is now a branded, client-ready artifact** (ADR-017).
+  `eds_audit_report` output gains, by default: a **Focus GTS Navigator letterhead**
+  (embedded logo, self-contained), an **executive summary** (auto-written from the
+  numbers, or pass your own `executiveSummary`), the Navigator accent color, a
+  **print-perfect stylesheet + "Save as PDF"** control (no headless-browser
+  dependency — uses the browser's own Print), and a subtle **Navigator credit band
+  with three CTAs** (Book a call · Explore Navigator · Free audit) that appears on
+  every report and is never removable. New optional `brand` input
+  (`agency`/`preparedFor`/`accentColor`/`logo`) lets a caller white-label the
+  letterhead; the Navigator footer credit always stays. All brand/summary inputs
+  are HTML-escaped and the accent color is strictly validated — this is a document
+  handed to third parties. Still 40 tools (a presentation layer on the existing
+  report, no new tool).
+
 ## [0.13.1] - 2026-08-16
 
 ### Fixed

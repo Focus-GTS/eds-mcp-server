@@ -570,7 +570,7 @@ export function createServer(options: EdsClientOptions): McpServer {
 
   server.tool(
     'eds_audit_report',
-    'Run a site audit and return a beautiful, self-contained HTML site-health report — per-dimension health scores, a prioritized issue list, and the suggested fixes — ready to save, host, or share. Same options as eds_audit_site. Read-only.',
+    'Run a site audit and return a beautiful, self-contained, client-ready HTML report — a Focus GTS Navigator letterhead, an executive summary, per-dimension health scores, a prioritized issue list with suggested fixes, and a "Save as PDF" button (browser print, no dependency). Navigator-branded by default. Optionally pass `brand` (your own agency name, logo as a data: URI, hex accentColor, preparedFor client name) to white-label the letterhead, and/or an `executiveSummary` you write; the Navigator footer credit always stays. Same audit options as eds_audit_site. Read-only.',
     {
       pathPrefix: z.string().optional().describe('Only audit pages under this path prefix. Omit for the whole site.'),
       maxPages: z.number().int().positive().max(1000).optional().describe('Max pages to fetch for per-page checks (default 50).'),
@@ -580,6 +580,19 @@ export function createServer(options: EdsClientOptions): McpServer {
         .describe(`Which dimensions to include (default all): ${ALL_DIMENSIONS.join(', ')}.`),
       domain: z.string().optional().describe('Live domain for RUM-based performance and 404 checks (needs EDS_DOMAIN_KEY). Also used as the report title.'),
       days: z.number().int().positive().max(365).optional().describe('RUM look-back window in days (default 7).'),
+      brand: z
+        .object({
+          agency: z.string().optional().describe('Your agency name (shown as "Prepared by" and, without a logo, as the wordmark).'),
+          preparedFor: z.string().optional().describe('The client this report is for ("Prepared for Acme Corp").'),
+          accentColor: z.string().optional().describe('Hex accent color (e.g. #7647dd) that replaces the default; invalid or too-light values fall back to the default.'),
+          logo: z.string().max(700_000).optional().describe('Logo as a data: URI (keeps the report self-contained; https URLs are not accepted). Embedded in the letterhead; falls back to the Navigator logo if oversized or unloadable.'),
+        })
+        .optional()
+        .describe('Agency branding — turns the report into a client deliverable (letterhead + Save-as-PDF).'),
+      executiveSummary: z
+        .string()
+        .optional()
+        .describe('A plain-English summary you write from the findings, shown prominently at the top. If omitted on a branded report, a factual summary is generated from the numbers.'),
     },
     async (args) => {
       const site = args.domain ?? `${options.owner}/${options.repo}`;
