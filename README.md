@@ -10,7 +10,7 @@
 
 ### Let an AI agent run — and *improve* — your Adobe Edge Delivery site.
 
-**40 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
+**41 tools. No extra dependencies beyond the MCP SDK. Works with any EDS site.**
 The first MCP server purpose-built for Edge Delivery Services.
 
 **Read your content → audit it → fix what's wrong → publish → undo any of it.**
@@ -56,7 +56,7 @@ It doesn't just *drive* your site — it **improves** it, safely. Point it at an
 
 ```mermaid
 flowchart LR
-  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>40 tools"]
+  A["AI agent<br/>(Claude Code · Cursor · Copilot)"] -- MCP / stdio --> B["eds-mcp-server<br/>41 tools"]
   B --> C["Admin API<br/>admin.hlx.page"]
   B --> D["Content API<br/>*.aem.live"]
   B --> E["RUM / OpTel<br/>Core Web Vitals"]
@@ -91,7 +91,7 @@ sequenceDiagram
 
 ---
 
-## 🛠️ The 40 tools
+## 🛠️ The 41 tools
 
 ### Edge Delivery Services — publish, content, analytics
 
@@ -175,12 +175,15 @@ Nine tools reach a site's Document Authoring source directly (`admin.da.live`), 
 - `eds_audit_report`
 - `eds_audit_snapshot`
 - `eds_audit_trend`
+- `eds_audit_monitor`
 
 > **It tells you what's wrong.** `eds_audit_site` sweeps the whole site (or a subtree) and returns a **prioritized** list of issues across **SEO** (missing titles/descriptions, no H1, blocked from indexing), **accessibility** (images without alt text, missing landmarks, unlabeled form inputs), **freshness** (pages not updated in over a year), **sitemap coverage**, and — with a `domain` — **performance** (Core Web Vitals) and **404s** from Adobe's own real-user data. `eds_audit_page` does the same for one page. Read-only and safe to run anytime.
 >
 > **`eds_audit_report`** turns that audit into a **beautiful, client-ready HTML report** — a Focus GTS Navigator letterhead, an executive summary, per-dimension health scores, a prioritized issue list with each suggested fix, and a **Save-as-PDF** button (uses your browser's own print — no dependency). Self-contained (no external assets), ready to open, host, or send to a stakeholder. Pass an optional `brand` (agency name, logo, accent, "prepared for" client) to white-label the letterhead.
 >
 > **Track it over time.** `eds_audit_snapshot` records each audit's scores to a history sheet in your site's own content (private by default) and tells you the change since last time — *"89, ▲7 since last week."* **`eds_audit_trend`** turns that history into a shareable HTML **sparkline** of your score over time plus per-dimension movement. One snapshot is a mirror; the trend is the story.
+>
+> **Watch it on autopilot.** `eds_audit_monitor` audits, **diffs against the last snapshot**, and reports a status — **ok / degraded / broken** — and, when you give it a `webhook`, **pings Slack/Discord the moment health breaks** (a new critical, or a dimension fallen to poor). The server does the check + alert; you supply the schedule — a copy-paste **[scheduled GitHub Action](examples/monitor.yml)** or your agent runtime. Webhook is https-only and the payload carries no secrets.
 
 ### Safe fixes — repair what the audit finds
 
