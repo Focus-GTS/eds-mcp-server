@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Scheduled monitoring** (ADR-018) — `eds_audit_monitor`, the "watch primitive"
+  that completes the roadmap (See → Fix → Track → Sell → **Automate**). It runs the
+  audit, **diffs against the last snapshot** (the ADR-016 history), and classifies
+  the change as **ok / degraded / broken** (broken = a new critical issue, or a
+  dimension fallen to poor), then records the new snapshot. Pass a `webhook`
+  (https Slack/Discord/generic) and it POSTs a **compact, secret-free alert** when
+  the status crosses `alertOn` (default `broken`). The server owns the check +
+  alert; the **schedule is external** — a copy-paste scheduled GitHub Action
+  (`examples/monitor.yml`) or your agent runtime provides the heartbeat, since a
+  stateless MCP tool can't self-run. Webhook is https-only; a webhook failure
+  degrades to a note and never breaks the run. Auto-fix is intentionally left to a
+  human/agent (via the `eds_fix_*` tools) — no unattended production writes. 41
+  tools total.
+
 ## [0.14.0] - 2026-08-17
 
 ### Changed

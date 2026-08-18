@@ -1,7 +1,7 @@
 /**
  * MCP server factory for the EDS MCP server.
  *
- * Creates a {@link McpServer} instance with all 40 tools registered.
+ * Creates a {@link McpServer} instance with all 41 tools registered.
  * Tool naming follows the `eds_{verb}_{noun}` convention used by Adobe's
  * first-party MCP servers.
  *
@@ -634,6 +634,30 @@ export function createServer(options: EdsClientOptions): McpServer {
     async (args) => {
       const site = options.owner && options.repo ? `${options.owner}/${options.repo}` : 'this site';
       return auditHandlers.handleAuditTrend(daClient, site, args as Parameters<typeof auditHandlers.handleAuditTrend>[2]);
+    },
+  );
+
+  server.tool(
+    'eds_audit_monitor',
+    "Watch a site on a schedule: run the audit, DIFF it against the last snapshot, and report a status — ok / degraded / broken (a new critical issue, or a dimension fallen to poor). Records the new snapshot (shares the eds_audit_snapshot/eds_audit_trend history). Pass a `webhook` (https Slack/Discord/generic URL) to get pinged when the status crosses `alertOn` (default 'broken') — the payload is compact and carries only public audit data, never secrets. This is the 'automate it' primitive: the SERVER does the check + alert; you supply the schedule (a cron / a scheduled GitHub Action — see examples/monitor.yml — or your agent runtime). Requires EDS_DA_TOKEN. Same audit options as eds_audit_site.",
+    {
+      historyPath: z.string().optional().describe('DA path for the history sheet (default /audit-history.json).'),
+      webhook: z.string().max(2048).optional().describe('https:// webhook (Slack/Discord/generic) to POST an alert to when the status crosses alertOn.'),
+      alertOn: z.enum(['degraded', 'broken']).optional().describe("Alert threshold: 'broken' (default — new critical / a dimension fell to poor) or 'degraded' (any regression)."),
+      degradeDrop: z.number().int().positive().max(100).optional().describe('Overall-score drop (points) that counts as a regression (default 5).'),
+      pathPrefix: z.string().optional().describe('Only audit pages under this path prefix. Omit for the whole site.'),
+      maxPages: z.number().int().positive().max(1000).optional().describe('Max pages to fetch for per-page checks (default 50).'),
+      dimensions: z
+        .array(z.enum(ALL_DIMENSIONS as [string, ...string[]]))
+        .optional()
+        .describe(`Which dimensions to run (default all): ${ALL_DIMENSIONS.join(', ')}.`),
+      domain: z.string().optional().describe('Live domain for RUM-based performance and 404 checks (needs EDS_DOMAIN_KEY).'),
+      days: z.number().int().positive().max(365).optional().describe('RUM look-back window in days (default 7).'),
+      publish: z.boolean().optional().describe('Publish the history sheet after recording (default: kept private in DA).'),
+    },
+    async (args) => {
+      const site = args.domain ?? `${options.owner}/${options.repo}`;
+      return auditHandlers.handleAuditMonitor(daClient, client, site, args as Parameters<typeof auditHandlers.handleAuditMonitor>[3]);
     },
   );
 

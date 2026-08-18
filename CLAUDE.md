@@ -1,6 +1,6 @@
 # EDS MCP Server
 
-MCP server for Adobe Edge Delivery Services. Provides 40 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
+MCP server for Adobe Edge Delivery Services. Provides 41 tools for AI agents to manage EDS sites: preview, publish, bulk operations, search, redirects, read content, query metrics, and configure sites.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Follows Adobe's MCP conventions (derived from `adobe-rnd/da-mcp`):
 src/
   index.ts              -- Entry point, reads env vars, connects stdio transport
   mcp/
-    server.ts           -- McpServer factory, all 40 tool registrations with Zod schemas
+    server.ts           -- McpServer factory, all 41 tool registrations with Zod schemas
     handlers.ts         -- One async function per tool
   eds-admin/
     client.ts           -- HTTP client wrapping all EDS APIs
@@ -127,6 +127,7 @@ EDS_OWNER=myorg EDS_REPO=mysite claude mcp add eds -- npx @focusgts/eds-mcp-serv
 | `eds_audit_report` | Run the site audit and return a beautiful, self-contained, shareable HTML site-health report |
 | `eds_audit_snapshot` | Run the audit and record its scores to a history sheet in the site's DA (track health over time; returns change since last snapshot) |
 | `eds_audit_trend` | Show site health over time — a self-contained HTML sparkline + per-dimension movement from the recorded snapshots |
+| `eds_audit_monitor` | Watch on a schedule — audit, diff vs last snapshot, report ok/degraded/broken, record the snapshot, and (opt-in) POST a webhook alert when it regresses |
 | `eds_fix_metadata` | Fix a page's title/description/OG image via its DA Metadata block (dry-run + undo, optional publish) |
 | `eds_bulk_fix_metadata` | Fix metadata across many pages in one batch with a single aggregated undo (dry-run + optional publish) |
 | `eds_fix_redirect` | Add/update 301 redirect rules in the site's `redirects` sheet to fix 404s (dry-run + undo, optional publish) |
@@ -137,6 +138,8 @@ DA tools (`eds_da_*`) access the authored source directly via `admin.da.live` (a
 **Safe writes (ADR-009).** `eds_da_push` is safe by default: pass `dryRun: true` to preview exactly what would change (create / update / unchanged, with line-diff counts) and write nothing, or `withUndo: true` to capture the prior state and get back an `undo` object. Feed that object to `eds_da_rollback` to reverse the push — restoring updated docs to their prior content and deleting the ones the push created. This is what makes pointing the server at a production site trustworthy: preview before writing, undo after.
 
 **Redirect fixes (ADR-013).** `eds_fix_redirect` adds/updates 301 redirect rules in the site's `redirects` sheet (a single document at the root whose table's first row is `Source`/`Destination` column names — grounded in Adobe's spreadsheets doc; the redirect sheet is the canonical example). Reads the existing `/redirects` DA doc (or creates it), updates a rule for a matching Source or appends a new row — preserving headers and any extra columns (no data loss), idempotent — through the safe-writes path (dry-run + undo + optional publish). All rules live in ONE sheet, so one tool handles single or bulk. Closes the 404 loop (audit finds 404s → this fixes them). Reader/writer in `src/fix/redirects.ts`.
+
+**Automate-it — scheduled monitoring (ADR-018).** `eds_audit_monitor` is the "watch primitive": it audits, DIFFs against the last snapshot (ADR-016 history), classifies the change as **ok / degraded / broken** (broken = a new critical, or a dimension fell to poor), records the new snapshot (shared history series), and — opt-in — POSTs a compact alert to a `webhook` (Slack `text` / Discord `content` / generic JSON) when the status crosses `alertOn` (default `broken`). The **heartbeat is external** — the stateless server can't self-schedule; ship `examples/monitor.yml` (a scheduled GitHub Action) or use the agent runtime. Webhook is **https-only**, payload is **secret-free** (public audit data only — never the DA token or history sheet), failures degrade to a note (never break the run). **Auto-fix is deliberately OUT of v1** (unattended production writes too risky — detect→alert→human approves via `eds_fix_*`). Assessment logic in `src/audit/monitor.ts` (pure/testable); handler `handleAuditMonitor` + `sendWebhook` in `src/mcp/audit-handlers.ts`. Requires EDS_DA_TOKEN.
 
 **Sell-it — branded, client-ready report (ADR-017).** `eds_audit_report` now emits a Navigator-branded artifact by default: a Focus GTS Navigator letterhead (embedded logo via `src/audit/brand-navigator.ts`), an executive summary (auto-written from the numbers, or pass `executiveSummary`), the Navigator purple accent, a print-perfect `@media print` stylesheet + "Save as PDF" (browser print — no headless-browser dep), and a subtle-but-unmistakable Navigator credit band with three CTAs (Book a call → /contactus/, Explore Navigator → /navigator/, Free audit → /eds-score/) that always renders and is never removable. Optional `brand` ({ agency, preparedFor, accentColor, logo }) white-labels the letterhead; the Navigator footer credit stays regardless. Strategic purpose: the free tool is a Navigator lead-gen billboard (like Pre-Flight/EDS Score), not a services deliverable. All brand/summary text is `esc()`-escaped; accentColor is strict-hex-validated; logo must be a `data:`/`https:` URI. Presentation layer in `src/audit/report.ts` (`BrandOptions`); no new tool (still 40).
 

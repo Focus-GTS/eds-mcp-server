@@ -1,0 +1,80 @@
+# Scheduled EDS site-health monitor (ADR-018).
+#
+# This is the "heartbeat" the MCP server can't provide itself: a free GitHub
+# Actions cron that runs eds_audit_monitor on a schedule and pings a webhook when
+# the site's health crosses from ok → broken. Copy this into your site repo's
+# .github/workflows/, set the secrets below, and you have hands-off monitoring.
+#
+# The server does the check + diff + alert; GitHub Actions provides the clock.
+#
+# Secrets to set (Repo → Settings → Secrets and variables → Actions):
+#   EDS_API_KEY      admin token for the audit (or use browser-login locally)
+#   EDS_DA_TOKEN     Document Authoring token (to read/record the history sheet)
+#   EDS_DOMAIN_KEY   (optional) enables performance + 404 checks from RUM
+#   EDS_DOMAIN       (optional) your REAL production domain for RUM, e.g. www.example.com
+#                    (RUM is keyed to the live domain — not the *.aem.live host)
+#   ALERT_WEBHOOK    (optional) an https Slack/Discord/generic webhook URL
+
+name: EDS Health Monitor
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # every day at 13:00 UTC — adjust to taste
+  workflow_dispatch: {} # allow a manual run from the Actions tab
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the health monitor
+        env:
+          EDS_OWNER: your-org # ← your EDS GitHub org
+          EDS_REPO: your-site # ← your EDS repo
+          EDS_API_KEY: ${{ secrets.EDS_API_KEY }}
+          EDS_DA_TOKEN: ${{ secrets.EDS_DA_TOKEN }}
+          EDS_DOMAIN_KEY: ${{ secrets.EDS_DOMAIN_KEY }}
+          EDS_DOMAIN: ${{ secrets.EDS_DOMAIN }}
+          ALERT_WEBHOOK: ${{ secrets.ALERT_WEBHOOK }}
+        run: |
+          # Drive the MCP server's eds_audit_monitor tool over stdio. This inline
+          # client sends one tools/call and prints the result; swap in your own
+          # MCP client or agent runtime if you prefer.
+          node --input-type=module <<'NODE'
+          import { spawn } from 'node:child_process';
+          const p = spawn('npx', ['-y', '@focusgts/eds-mcp-server'], {
+            stdio: ['pipe', 'pipe', 'inherit'],
+            env: process.env,
+          });
+          const send = (m) => p.stdin.write(JSON.stringify(m) + '\n');
+          send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'cron', version: '1' } } });
+          send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+          send({
+            jsonrpc: '2.0', id: 2, method: 'tools/call',
+            params: {
+              name: 'eds_audit_monitor',
+              arguments: {
+                // Pass your REAL production domain (RUM is keyed to it) to enable
+                // the performance + 404 checks. Without it those dimensions skip.
+                ...(process.env.EDS_DOMAIN_KEY && process.env.EDS_DOMAIN ? { domain: process.env.EDS_DOMAIN } : {}),
+                ...(process.env.ALERT_WEBHOOK ? { webhook: process.env.ALERT_WEBHOOK } : {}),
+                alertOn: 'broken',
+              },
+            },
+          });
+          let buf = '';
+          p.stdout.on('data', (d) => {
+            buf += d;
+            for (const line of buf.split('\n').slice(0, -1)) {
+              buf = buf.slice(line.length + 1);
+              let msg; try { msg = JSON.parse(line); } catch { continue; }
+              if (msg.id === 2) {
+                console.log(msg.result?.content?.[0]?.text ?? JSON.stringify(msg));
+                p.kill();
+                // Fail the job on a protocol-level error (msg.error, no result) OR
+                // a handler error (result.isError) — never a silent green check.
+                process.exit(msg.error || msg.result?.isError ? 1 : 0);
+              }
+            }
+          });
+          setTimeout(() => { console.error('monitor timed out'); p.kill(); process.exit(1); }, 120000);
+          NODE
