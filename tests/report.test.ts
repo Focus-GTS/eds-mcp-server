@@ -28,7 +28,7 @@ describe('generateReport', () => {
     expect(html).toMatch(/^<!doctype html>/i);
     expect(html).toContain('<style>'); // inline CSS, no external assets
     expect(html).not.toMatch(/<link[^>]+href|<script[^>]+src=/i); // truly self-contained
-    expect(html).toContain('<title>Site Health — acme.com</title>');
+    expect(html).toContain('<title>Website Health Report — acme.com</title>');
     expect(html).toContain('acme.com');
     expect(html).toContain(`Audited ${META.generatedAt}`);
   });
@@ -78,6 +78,43 @@ describe('generateReport', () => {
     expect(html).not.toContain('can be fixed in place');
   });
 
+  it('always carries the Navigator lead-gen credit + three CTAs (ADR-017)', () => {
+    // Even the plain, unbranded report is a Navigator billboard.
+    const html = generateReport(makeReport(), META);
+    expect(html).toContain('Navigator');
+    expect(html).toContain('Book a call');
+    expect(html).toContain('https://focusgts.com/contactus/');
+    expect(html).toContain('https://focusgts.com/navigator/');
+    expect(html).toContain('https://focusgts.com/eds-score/');
+    // …and it never points at the staffing side.
+    expect(html).not.toContain('/talent-solutions');
+  });
+
+  it('rejects an https logo and an oversized/invalid logo, falling back to the default (ADR-017 review)', () => {
+    // https logo → rejected (would be a tracking beacon on a shared doc) → default embedded logo.
+    const https = generateReport(makeReport(), { ...META, brand: { logo: 'https://evil.example.com/track.png?u=123' } });
+    expect(https).not.toContain('evil.example.com');
+    expect(https).toContain('data:image/'); // fell back to the embedded Navigator logo
+    // Oversized data-URI → rejected → default.
+    const huge = 'data:image/png;base64,' + 'A'.repeat(600_000);
+    const big = generateReport(makeReport(), { ...META, brand: { logo: huge } });
+    expect(big).not.toContain('A'.repeat(600_000));
+    // A valid custom data-URI is accepted AND gets an onerror→wordmark fallback.
+    const ok = generateReport(makeReport(), { ...META, brand: { logo: 'data:image/svg+xml;base64,PHN2Zy8+', agency: 'Acme Agency' } });
+    expect(ok).toContain('data:image/svg+xml;base64,PHN2Zy8+');
+    expect(ok).toContain('onerror');
+    expect(ok).toContain('lh-wordmark');
+  });
+
+  it('rejects a too-light accent color (would be invisible), keeping the default (ADR-017 review)', () => {
+    const white = generateReport(makeReport(), { ...META, brand: { accentColor: '#ffffff' } });
+    expect(white).toContain('--accent:#7647dd'); // fell back to Navigator purple
+    expect(white).not.toContain('--accent:#ffffff');
+    // A usable custom accent is honored.
+    const teal = generateReport(makeReport(), { ...META, brand: { accentColor: '#0a7d6b' } });
+    expect(teal).toContain('--accent:#0a7d6b');
+  });
+
   it('renders a clean report when there are no findings', () => {
     const clean = makeReport({ findings: [], summary: { critical: 0, warning: 0, info: 0, total: 0, pagesAudited: 3 }, skipped: [] });
     const html = generateReport(clean, META);
@@ -106,6 +143,6 @@ describe('handleAuditReport', () => {
     } as unknown as EdsClient;
     const res = await handleAuditReport(client, 'acme/site', {});
     expect(res.content[0].text).toMatch(/^<!doctype html>/i);
-    expect(res.content[0].text).toContain('Site Health — acme/site');
+    expect(res.content[0].text).toContain('Website Health Report — acme/site');
   });
 });

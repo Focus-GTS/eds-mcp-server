@@ -10,7 +10,7 @@ import type { DaClient } from '../da-admin/client.js';
 import { formatError } from '../utils/errors.js';
 import { auditSite, auditSinglePage, type AuditSiteOptions } from '../audit/engine.js';
 import type { AuditDimension, AuditFinding, AuditReport } from '../audit/types.js';
-import { generateReport } from '../audit/report.js';
+import { generateReport, type BrandOptions } from '../audit/report.js';
 import { computeScores } from '../audit/score.js';
 import { applyHistory, parseHistory, delta, DIMENSION_COLUMNS, type Snapshot } from '../audit/history.js';
 import { renderTrend } from '../audit/trend.js';
@@ -95,6 +95,8 @@ export async function handleAuditReport(
     dimensions?: AuditDimension[];
     domain?: string;
     days?: number;
+    brand?: BrandOptions;
+    executiveSummary?: string;
   },
 ) {
   try {
@@ -106,7 +108,12 @@ export async function handleAuditReport(
       days: args.days,
     };
     const report = await auditSite(client, options);
-    const html = generateReport(report, { site, generatedAt: new Date().toISOString().slice(0, 10) });
+    const html = generateReport(report, {
+      site,
+      generatedAt: new Date().toISOString().slice(0, 10),
+      brand: args.brand,
+      executiveSummary: args.executiveSummary,
+    });
     return textResult(html);
   } catch (error) {
     return errorResult(error);

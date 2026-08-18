@@ -11,6 +11,7 @@
 
 import { ALL_DIMENSIONS, type AuditDimension, type AuditFinding, type AuditReport } from './types.js';
 import { grade, scoreClass, scoreDimension } from './score.js';
+import { NAVIGATOR_ACCENT, NAVIGATOR_LOGO, NAVIGATOR_NAME } from './brand-navigator.js';
 
 const DIMENSION_LABELS: Record<AuditDimension, string> = {
   seo: 'SEO',
@@ -34,7 +35,12 @@ const DIMENSION_TIPS: Record<AuditDimension, string> = {
 const SEVERITY_ORDER: Record<AuditFinding['severity'], number> = { critical: 0, warning: 1, info: 2 };
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /** Inline SVG ring gauge. Colors/type come from CSS classes so it stays theme-aware. */
@@ -83,19 +89,19 @@ function groupFindings(findings: AuditFinding[]): Group[] {
 const STYLE = `
 :root{
   --bg:#eef1f7;--panel:#ffffff;--ink:#0e1730;--muted:#5c688a;--faint:#8a95b4;--line:#e4e8f1;--track:#e7ebf4;
-  --accent:#5b54e6;--good:#12a150;--fair:#d18700;--poor:#e0402f;
+  --accent:#5b54e6;--good:#12a150;--fair:#d18700;--poor:#e0402f;--navp:#7647dd;
   --shadow:0 1px 2px rgba(16,24,48,.04),0 8px 24px rgba(16,24,48,.06);
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#080c18;--panel:#111a30;--ink:#eef2fb;--muted:#98a4c6;--faint:#6f7ca3;--line:#212d4c;--track:#1c2743;
-  --accent:#9a8dff;--good:#38c47f;--fair:#eab53f;--poor:#f26a5a;
+  --accent:#9a8dff;--good:#38c47f;--fair:#eab53f;--poor:#f26a5a;--navp:#9a8dff;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
 }}
 :root[data-theme="dark"]{
   --bg:#080c18;--panel:#111a30;--ink:#eef2fb;--muted:#98a4c6;--faint:#6f7ca3;--line:#212d4c;--track:#1c2743;
-  --accent:#9a8dff;--good:#38c47f;--fair:#eab53f;--poor:#f26a5a;
+  --accent:#9a8dff;--good:#38c47f;--fair:#eab53f;--poor:#f26a5a;--navp:#9a8dff;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
 }
 *{box-sizing:border-box}
@@ -172,12 +178,116 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font
 footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);color:var(--faint);font-size:12px;text-align:center;line-height:1.7}
 footer a{color:var(--accent);text-decoration:none}
 footer code{font-family:var(--mono);font-size:11.5px;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+/* Navigator credit — subtle but unmistakable, on every report (ADR-017) */
+.nav-credit{margin-bottom:16px;padding:18px 20px;background:var(--panel);border:1px solid var(--line);
+  border-top:3px solid var(--navp);border-radius:14px;box-shadow:var(--shadow);text-align:center}
+.nav-mark{font-size:17px;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
+.nav-mark .nav-hl{color:var(--navp)}
+.nav-tag{font-size:12.5px;color:var(--muted);margin-top:4px}
+.nav-cta{margin-top:10px;font-size:12.5px;font-weight:600}
+.nav-cta a{color:var(--navp);text-decoration:none}
+.nav-cta a:hover{text-decoration:underline}
+.nav-cta .sep{color:var(--faint);margin:0 9px}
+.fine{font-size:12px;color:var(--faint);line-height:1.6}
+
+/* Branding (ADR-017) — client-ready deliverable */
+.letterhead{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+  padding-bottom:18px;margin-bottom:20px;border-bottom:2px solid var(--accent)}
+.lh-logo{height:64px;width:auto;max-width:340px;display:block}
+.lh-wordmark{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
+.lh-for{text-align:right;font-size:12px;color:var(--faint);line-height:1.5}
+.lh-for .lh-label{display:block;text-transform:uppercase;letter-spacing:.1em;font-size:10.5px}
+.lh-for b{color:var(--ink);font-size:15px;font-weight:700}
+.lh-for .lh-date{display:block;font-variant-numeric:tabular-nums}
+.exec{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;
+  box-shadow:var(--shadow);padding:20px 24px;font-size:15px;line-height:1.65;color:var(--muted)}
+.exec p{margin:0 0 12px}.exec p:last-child{margin:0}.exec p:first-child{color:var(--ink)}
+.pdfbtn{position:fixed;top:16px;right:16px;z-index:20;font:inherit;font-size:13px;font-weight:650;cursor:pointer;
+  background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 15px;box-shadow:0 6px 20px rgba(16,24,48,.25)}
+.pdfbtn:hover{filter:brightness(1.06)}
+
+@media print{
+  :root{--bg:#fff;--panel:#fff;--ink:#0e1730;--muted:#3d485f;--faint:#6b748c;--line:#d7dced;--track:#e7ebf4}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{background:#fff}
+  .wrap{max-width:none;padding:0}
+  .pdfbtn{display:none}
+  .hero,.ga,.issue,.exec,.fixlead,.gauges,.clean{box-shadow:none}
+  .issue,.ga,.exec,.hero,.clean{break-inside:avoid;page-break-inside:avoid}
+  .section-title{break-after:avoid;page-break-after:avoid}
+  a[href]{color:inherit;text-decoration:none}
+}
 `.trim();
+
+/** Agency branding for a client-ready report (ADR-017). All optional. */
+export interface BrandOptions {
+  /** Agency name, rendered as the "prepared by" wordmark. */
+  agency?: string;
+  /** The client this report is prepared for. */
+  preparedFor?: string;
+  /** Hex accent color that replaces the report's default (validated). */
+  accentColor?: string;
+  /** A logo, as a `data:` URI or `https://` URL, embedded in the letterhead. */
+  logo?: string;
+}
+
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+// Only a `data:` image URI — never `https://`. This keeps every report fully
+// self-contained (works offline, no CSP issues) and, crucially, prevents a report
+// emailed to a client from becoming a tracking beacon that pings a logo host on
+// open (ADR-017 privacy). A malformed data-URI degrades to the wordmark at render.
+const SAFE_LOGO = /^data:image\/[a-z+]+;/i;
+/** Max embedded logo size (a data-URI). A larger custom logo falls back to the default. */
+const LOGO_CAP = 512 * 1024;
+
+/** A custom accent must be valid hex AND not so light it vanishes on the light ground. */
+function usableAccent(hex: string): boolean {
+  if (!HEX_COLOR.test(hex)) return false;
+  const h = hex.slice(1);
+  const full = h.length === 3 ? h.replace(/./g, (c) => c + c) : h;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum <= 0.75; // reject near-white accents (would be invisible / illegible)
+}
+
+/** A deterministic, factual executive summary from the numbers (agent can override). */
+function factualSummary(
+  report: AuditReport,
+  overall: number,
+  perDim: Array<{ dim: AuditDimension; skipped: boolean; score: number }>,
+  fixableGroups: number,
+  site: string,
+): string {
+  const s = report.summary;
+  const scored = perDim.filter((d) => !d.skipped);
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  const parts: string[] = [];
+  parts.push(
+    `${site} scores ${overall}/100 (grade ${grade(overall)}) across ${s.total} finding${s.total === 1 ? '' : 's'} on ${report.summary.pagesAudited ?? 0} page${(report.summary.pagesAudited ?? 0) === 1 ? '' : 's'}.`,
+  );
+  if (s.critical > 0 || s.warning > 0) {
+    parts.push(
+      `${s.critical} critical and ${s.warning} warning issue${s.critical + s.warning === 1 ? '' : 's'} were identified${fixableGroups > 0 ? `, of which ${fixableGroups} issue type${fixableGroups === 1 ? '' : 's'} can be fixed in place` : ''}.`,
+    );
+  } else {
+    parts.push('No critical or warning issues were found — the site is in strong shape.');
+  }
+  if (best && worst && best.dim !== worst.dim) {
+    parts.push(
+      `${DIMENSION_LABELS[best.dim]} is the strongest area (${best.score}/100); ${DIMENSION_LABELS[worst.dim]} needs the most attention (${worst.score}/100).`,
+    );
+  }
+  return parts.join(' ');
+}
 
 /** Render an audit report as a self-contained HTML document. */
 export function generateReport(
   report: AuditReport,
-  meta: { site: string; generatedAt: string },
+  meta: { site: string; generatedAt: string; brand?: BrandOptions; executiveSummary?: string },
 ): string {
   const pages = report.summary.pagesAudited ?? 1;
   // Only card the dimensions the audit ATTEMPTED — a dimension excluded by the
@@ -251,19 +361,52 @@ export function generateReport(
     ? `<div class="note">Not measured yet: ${esc(skippedLabels.join(' · '))} — these read your site’s real-visitor data. Add your live domain to switch them on.</div>`
     : '';
 
+  // --- Branding (ADR-017) — Navigator is the DEFAULT on every report; the
+  // optional brand.* inputs override it. All inputs validated before touching
+  // markup/CSS. The full treatment (letterhead + accent + executive summary +
+  // Save-as-PDF) always renders — every report is a Navigator-branded artifact.
+  const brand = meta.brand;
+  const accent = brand?.accentColor && usableAccent(brand.accentColor) ? brand.accentColor : NAVIGATOR_ACCENT;
+  const logo = brand?.logo && SAFE_LOGO.test(brand.logo) && brand.logo.length <= LOGO_CAP ? brand.logo : NAVIGATOR_LOGO;
+  const customAgency = brand?.agency?.trim();
+  const agency = customAgency || NAVIGATOR_NAME;
+  const preparedFor = brand?.preparedFor?.trim();
+
+  const letterhead =
+    `<div class="letterhead">` +
+    // If a custom logo fails to load (bad data-URI), hide it and reveal the
+    // wordmark — never a broken-image icon on a client-facing document (ADR-017).
+    `<div class="lh-brand"><img class="lh-logo" src="${esc(logo)}" alt="${esc(agency)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><span class="lh-wordmark" hidden>${esc(agency)}</span></div>` +
+    (preparedFor
+      ? `<div class="lh-for"><span class="lh-label">Prepared for</span><b>${esc(preparedFor)}</b><span class="lh-date">${esc(meta.generatedAt)}</span></div>`
+      : `<div class="lh-for"><span class="lh-date">${esc(meta.generatedAt)}</span></div>`) +
+    `</div>`;
+
+  const summaryText = meta.executiveSummary?.trim() || factualSummary(report, overall, perDim, fixableGroups, meta.site);
+  const execSection =
+    `<div class="section-title">Executive summary</div>` +
+    `<section class="exec">${summaryText.split(/\n\n+/).map((p) => `<p>${esc(p.trim())}</p>`).join('')}</section>`;
+
+  const pdfButton = `<button class="pdfbtn" onclick="window.print()">↧ Save as PDF</button>`;
+  // The Navigator footer credit already carries attribution; only add a
+  // "Prepared by" line when a custom (white-label) agency is supplied.
+  const footerBrand = customAgency ? `Prepared by ${esc(customAgency)} · ` : '';
+
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Site Health — ${esc(meta.site)}</title>
+<title>Website Health Report — ${esc(meta.site)}</title>
 <style>${STYLE}</style>
 </head>
 <body>
-<div class="wrap">
+${pdfButton}
+<div class="wrap" style="--accent:${accent}">
+  ${letterhead}
   <header class="hero">
     <div class="hero-main">
-      <div class="brand">EDS Site Health</div>
+      <div class="brand">Website Health Report</div>
       <h1>${esc(meta.site)}</h1>
       <div class="meta">Audited ${esc(meta.generatedAt)} · ${pages} page${pages === 1 ? '' : 's'} inspected</div>
       <div class="pills">
@@ -279,6 +422,8 @@ export function generateReport(
     </div>
   </header>
 
+  ${execSection}
+
   <div class="section-title">By dimension</div>
   <section class="gauges" style="--cols:${cols}">${gaugesHtml}</section>
 
@@ -287,8 +432,14 @@ export function generateReport(
   ${issuesHtml}
 
   <footer>
-    Generated by <a href="https://www.npmjs.com/package/@focusgts/eds-mcp-server">@focusgts/eds-mcp-server</a><br>
-    Health score derived from findings${fixableGroups > 0 ? ` · issues marked <span class="fixable">✦ Fixable</span> can be repaired with the <code>eds_fix_*</code> tools — safely, with undo` : ''}.
+    <div class="nav-credit">
+      <div class="nav-mark">Focus GTS <span class="nav-hl">▸ Navigator</span></div>
+      <div class="nav-tag">Free EDS site-health check — from the team behind Adobe Edge Delivery MCP tooling.</div>
+      <div class="nav-cta"><a href="https://focusgts.com/contactus/">Book a call</a><span class="sep">·</span><a href="https://focusgts.com/navigator/">Explore Navigator</a><span class="sep">·</span><a href="https://focusgts.com/eds-score/">Free audit</a></div>
+    </div>
+    <div class="fine">
+      ${footerBrand}Generated by <a href="https://www.npmjs.com/package/@focusgts/eds-mcp-server">@focusgts/eds-mcp-server</a> · health score derived from findings${fixableGroups > 0 ? ` · issues marked <span class="fixable">✦ Fixable</span> can be repaired with the <code>eds_fix_*</code> tools — safely, with undo` : ''}.
+    </div>
   </footer>
 </div>
 </body>
